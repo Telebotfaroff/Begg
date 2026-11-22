@@ -1,3 +1,0 @@
-HTTP status: 200
-Content type: text/html
-Final URL: https://beeg.com/-0786924192839399

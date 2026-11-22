@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: Website URL to inspect
+        description: URL to inspect
         required: true
         type: string
 
@@ -16,185 +16,194 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Fetch page and analyze HTML
+      - name: Fetch and inspect HTML
         env:
           TARGET_URL: ${{ inputs.url }}
         run: |
           python - <<'PY'
           import os, json, re, hashlib
-          from urllib.parse import urlparse, urljoin
-          from urllib.request import Request, urlopen
-          from html.parser import HTMLParser
           from datetime import datetime, timezone
+          from html.parser import HTMLParser
+          from urllib.parse import urlparse, urljoin, parse_qsl
+          from urllib.request import Request, urlopen
 
           target = os.environ["TARGET_URL"].strip()
           parsed = urlparse(target)
           if parsed.scheme not in ("http", "https") or not parsed.netloc:
-              raise SystemExit("Input must be a valid http(s) URL")
+              raise SystemExit("Please provide a valid http(s) URL")
 
-          req = Request(target, headers={"User-Agent": "Begg-HTML-Analyzer/1.0"})
-          with urlopen(req, timeout=30) as response:
+          request = Request(target, headers={"User-Agent": "Begg-HTML-Analyzer/1.0"})
+          with urlopen(request, timeout=30) as response:
               raw = response.read()
               status = response.status
-              headers = dict(response.headers.items())
+              content_type = response.headers.get("Content-Type", "")
               final_url = response.geturl()
 
           html = raw.decode("utf-8", errors="replace")
-          class Collector(HTMLParser):
+
+          class Parser(HTMLParser):
               def __init__(self):
                   super().__init__()
                   self.tags = {}
+                  self.classes = {}
                   self.images = []
-                  self.anchors = []
+                  self.links = []
                   self.scripts = []
                   self.styles = []
                   self.videos = []
-                  self.meta = []
-                  self.stack = []
-                  self.classes = {}
                   self.card_samples = []
-                  self.text_chunks = []
+                  self.title_parts = []
+                  self.in_title = False
+                  self.current_link = None
+
               def handle_starttag(self, tag, attrs):
                   a = dict(attrs)
                   self.tags[tag] = self.tags.get(tag, 0) + 1
                   classes = a.get("class", "")
                   for c in classes.split():
                       self.classes[c] = self.classes.get(c, 0) + 1
+                  if tag == "title":
+                      self.in_title = True
+                  if tag == "a":
+                      self.current_link = {"href": a.get("href"), "text": ""}
+                      self.links.append(self.current_link)
                   if tag == "img":
-                      self.images.append({"src": a.get("src"), "alt": a.get("alt"), "class": classes})
-                  elif tag == "a":
-                      self.anchors.append({"href": a.get("href"), "text": ""})
-                  elif tag == "script":
-                      self.scripts.append(a.get("src") or "(inline)")
-                  elif tag == "link" and a.get("rel") == "stylesheet":
+                      self.images.append({"src":a.get("src"), "alt":a.get("alt",""), "class":classes})
+                  if tag == "script":
+                      self.scripts.append(a.get("src") or "(inline script)")
+                  if tag == "link" and "stylesheet" in (a.get("rel") or "").split():
                       self.styles.append(a.get("href"))
-                  elif tag == "video":
-                      self.videos.append({"class": classes, "source_type": "present", "has_src": bool(a.get("src"))})
-                  if any(re.search(r"(video.?tile|unit.?frame|video.?card|content.?tile)", c, re.I) for c in classes.split()):
-                      if len(self.card_samples) < 30:
-                          self.card_samples.append({"tag":tag,"class":classes,"attrs":list(a.keys())})
-                  if tag in ("title","a"):
-                      self.stack.append(tag)
-              def handle_endtag(self, tag):
-                  if tag in self.stack:
-                      while self.stack:
-                          t = self.stack.pop()
-                          if t == tag: break
-              def handle_data(self, data):
-                  if self.stack and self.stack[-1] in ("title","a"):
-                      if self.stack[-1] == "title":
-                          title = data.strip()
-                          if title: self.text_chunks.append(("title",title))
-                      elif self.anchors:
-                          s = data.strip()
-                          if s: self.anchors[-1]["text"] += (" " + s)
-          p = Collector()
-          p.feed(html)
+                  if tag == "video":
+                      self.videos.append({"class":classes, "has_src":bool(a.get("src")), "attribute_names":sorted(a.keys())})
+                  if re.search(r"(tile|card|frame|video)", classes, re.I) and len(self.card_samples) < 50:
+                      self.card_samples.append({"tag":tag, "class":classes, "attributes":sorted(a.keys())})
 
+              def handle_endtag(self, tag):
+                  if tag == "title":
+                      self.in_title = False
+                  if tag == "a":
+                      self.current_link = None
+
+              def handle_data(self, data):
+                  s = data.strip()
+                  if not s:
+                      return
+                  if self.in_title:
+                      self.title_parts.append(s)
+                  if self.current_link is not None:
+                      self.current_link["text"] += (" " + s)
+
+          parser = Parser()
+          parser.feed(html)
           base = urlparse(final_url)
-          def clean_link(raw):
-              if not raw: return None
-              u = urlparse(urljoin(final_url, raw))
-              if u.scheme not in ("http","https"): return None
-              # Exclude media endpoints and signed/token-bearing URLs from the report.
-              if re.search(r"\.(m3u8|mp4|m4v|ts|webm|mov)(?:$|\?)", u.path, re.I): return None
-              if any(k.lower() in ("key","token","signature","sig","auth","expires") for k,v in __import__("urllib.parse").parse_qsl(u.query, keep_blank_values=True)): return None
+
+          def safe_page_url(value):
+              if not value:
+                  return None
+              u = urlparse(urljoin(final_url, value))
+              if u.scheme not in ("http", "https"):
+                  return None
+              if re.search(r"\.(m3u8|mp4|m4v|ts|webm|mov)(?:$|\?)", u.path, re.I):
+                  return None
+              sensitive = {"key","token","signature","sig","auth","expires"}
+              if any(k.lower() in sensitive for k, _ in parse_qsl(u.query, keep_blank_values=True)):
+                  return None
               return u.scheme + "://" + u.netloc + u.path
-          safe_links = []
-          for a in p.anchors:
-              cleaned = clean_link(a.get("href"))
-              if cleaned and (urlparse(cleaned).netloc == base.netloc):
-                  item = {"url": cleaned, "text": re.sub(r"\s+"," ",a["text"]).strip()[:180]}
-                  if item not in safe_links: safe_links.append(item)
-          safe_images = []
-          for im in p.images:
-              cleaned = clean_link(im.get("src"))
-              if cleaned:
-                  safe_images.append({"url":cleaned, "alt": (im.get("alt") or "")[:120], "class":im.get("class","")[:160]})
+
+          page_links = []
+          for link in parser.links:
+              url = safe_page_url(link["href"])
+              if url and urlparse(url).netloc == base.netloc:
+                  item = {"url":url, "text":re.sub(r"\s+"," ",link["text"]).strip()[:160]}
+                  if item not in page_links:
+                      page_links.append(item)
+
+          image_refs = []
+          for item in parser.images:
+              url = safe_page_url(item["src"])
+              if url:
+                  image_refs.append({"url":url, "alt":item["alt"][:120], "class":item["class"][:160]})
+
           report = {
-              "generated_at": datetime.now(timezone.utc).isoformat(),
-              "requested_page": parsed.scheme + "://" + parsed.netloc + parsed.path,
-              "final_page": base.scheme + "://" + base.netloc + base.path,
-              "http_status": status,
-              "content_type": headers.get("Content-Type",""),
-              "html_bytes": len(raw),
-              "html_sha256": hashlib.sha256(raw).hexdigest(),
-              "page_title": next((t for k,t in p.text_chunks if k=="title"), ""),
-              "tag_counts": p.tags,
-              "class_frequency_top": sorted(p.classes.items(), key=lambda x:x[1], reverse=True)[:80],
-              "script_sources": p.scripts[:100],
-              "stylesheet_links": p.styles[:100],
-              "image_count": len(p.images),
-              "images": safe_images[:250],
-              "same_host_links_count": len(safe_links),
-              "same_host_links": safe_links[:300],
-              "video_elements": p.videos,
-              "card_like_element_samples": p.card_samples,
-              "notes": [
-                "Signed/tokenized URLs and direct media-file endpoints are intentionally excluded from committed reports.",
-                "This is a static HTML response analysis; browser-rendered DOM may differ."
-              ]
+              "generated_at":datetime.now(timezone.utc).isoformat(),
+              "page":parsed.scheme + "://" + parsed.netloc + parsed.path,
+              "final_page":base.scheme + "://" + base.netloc + base.path,
+              "http_status":status,
+              "content_type":content_type,
+              "html_bytes":len(raw),
+              "sha256":hashlib.sha256(raw).hexdigest(),
+              "title":" ".join(parser.title_parts),
+              "tag_counts":parser.tags,
+              "top_classes":sorted(parser.classes.items(), key=lambda x:x[1], reverse=True)[:100],
+              "script_sources":parser.scripts[:100],
+              "stylesheet_links":parser.styles[:100],
+              "image_count":len(parser.images),
+              "images":image_refs[:250],
+              "same_host_link_count":len(page_links),
+              "same_host_links":page_links[:300],
+              "video_elements":parser.videos,
+              "card_like_samples":parser.card_samples,
+              "notes":["This is static HTML analysis. A browser-rendered page may contain additional DOM.",
+                        "Signed/tokenized URLs and direct media endpoints are omitted from committed reports."]
           }
+
           os.makedirs("analysis", exist_ok=True)
           with open("analysis/latest.json","w",encoding="utf-8") as f:
               json.dump(report,f,ensure_ascii=False,indent=2)
-          md = [
-              "# Website HTML Analysis",
-              "",
+
+          def md_escape(value):
+              return str(value).replace("|","\\|").replace("\n"," ")
+
+          lines = [
+              "# Website HTML Analysis","",
               f"- Generated: {report['generated_at']}",
-              f"- Page: {report['requested_page']}",
-              f"- Final URL: {report['final_page']}",
+              f"- Page: {report['page']}",
               f"- HTTP status: {status}",
-              f"- Content type: {report['content_type']}",
-              f"- HTML size: {len(raw):,} bytes",
-              f"- SHA-256: {report['html_sha256']}",
-              f"- Title: {report['page_title']}",
-              f"- Images: {len(p.images)}",
-              f"- Same-host links: {len(safe_links)}",
-              f"- Video elements: {len(p.videos)}",
-              "",
-              "## Tag counts",
-              "",
-              "| Tag | Count |",
-              "|---|---:|",
+              f"- Content type: {content_type}",
+              f"- HTML bytes: {len(raw):,}",
+              f"- SHA-256: {report['sha256']}",
+              f"- Title: {report['title']}",
+              f"- Images found: {len(parser.images)}",
+              f"- Same-host links: {len(page_links)}",
+              f"- Video elements: {len(parser.videos)}","",
+              "## Tag counts","",
+              "| Tag | Count |","|---|---:|"
           ]
-          md += [f"| `<{tag}>` | {count} |" for tag,count in sorted(p.tags.items(), key=lambda x:x[1],reverse=True)]
-          md += ["", "## Frequent CSS classes", "", "| Class | Count |", "|---|---:|"]
-          md += [f"| `.{cls}` | {count} |" for cls,count in sorted(p.classes.items(),key=lambda x:x[1],reverse=True)[:80]]
-          md += ["", "## Script sources", ""] + [f"- {src}" for src in p.scripts[:100]]
-          md += ["", "## Stylesheets", ""] + [f"- {src}" for src in p.styles[:100]]
-          md += ["", "## Same-host page links (media links filtered)", "", "| Text | URL |", "|---|---|"]
-          md += [f"| {item['text'].replace('|','\\|')} | {item['url']} |" for item in safe_links[:300]]
-          md += ["", "## Image references (query parameters removed)", "", "| Alt | URL | Class |", "|---|---|---|"]
-          md += [f"| {item['alt'].replace('|','\\|')} | {item['url']} | {item['class'].replace('|','\\|')} |" for item in safe_images[:250]]
-          md += ["", "## Video element summary", "", "```json", json.dumps(p.videos,indent=2), "```"]
-          md += ["", "## Card-like DOM samples", "", "```json", json.dumps(p.card_samples,indent=2), "```"]
-          md += ["", "## Notes", "", "- Raw HTML is attached to this workflow run as an artifact.", "- This committed report omits signed/tokenized URLs and direct media endpoints.", "- Static HTML can differ from the browser-rendered page."]
+          lines += [f"| `<{tag}>` | {count} |" for tag,count in sorted(parser.tags.items(),key=lambda x:x[1],reverse=True)]
+          lines += ["","## Top CSS classes","","| Class | Count |","|---|---:|"]
+          lines += [f"| `.{md_escape(name)}` | {count} |" for name,count in report["top_classes"]]
+          lines += ["","## Script sources",""] + [f"- {src}" for src in report["script_sources"]]
+          lines += ["","## Stylesheets",""] + [f"- {src}" for src in report["stylesheet_links"]]
+          lines += ["","## Same-host links (filtered)","","| Link text | URL |","|---|---|"]
+          lines += [f"| {md_escape(item['text'])} | {item['url']} |" for item in page_links[:300]]
+          lines += ["","## Image references (query strings removed)","","| Alt | URL | Class |","|---|---|---|"]
+          lines += [f"| {md_escape(item['alt'])} | {item['url']} | {md_escape(item['class'])} |" for item in image_refs[:250]]
+          lines += ["","## Video element attributes summary","","```json",json.dumps(parser.videos,indent=2),"```"]
+          lines += ["","## Card-like DOM samples","","```json",json.dumps(parser.card_samples,indent=2),"```"]
+          lines += ["","## Notes",""] + [f"- {note}" for note in report["notes"]]
           with open("analysis/latest.md","w",encoding="utf-8") as f:
-              f.write("\n".join(md))
+              f.write("\n".join(lines))
           with open("analysis/raw.html","w",encoding="utf-8") as f:
               f.write(html)
-          print(f"Analysis complete: {len(raw)} bytes, {len(p.images)} images, {len(safe_links)} same-host links")
-          PY
+          print(f"Done: {len(raw)} HTML bytes, {len(parser.images)} image elements, {len(page_links)} same-host links")
 
-      - name: Upload raw HTML as workflow artifact
+      - name: Upload raw HTML snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: begg-raw-html
+          name: begg-html-snapshot
           path: analysis/raw.html
           retention-days: 7
 
-      - name: Commit analysis report
+      - name: Commit analysis reports to repository
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add analysis/latest.json analysis/latest.md
           if git diff --cached --quiet; then
-            echo "No report changes to commit."
+            echo "Report unchanged; nothing to commit."
           else
-            git commit -m "Update website HTML analysis report"
+            git commit -m "Update website HTML analysis"
             git push
           fi

@@ -1,0 +1,5 @@
+Requested URL: https://beeg.com/
+Fetched at (UTC): 2026-11-22 07:30:22
+HTTP status: 200
+Content type: text/html
+Final URL: https://beeg.com/

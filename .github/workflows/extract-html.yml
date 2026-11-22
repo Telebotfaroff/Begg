@@ -1,0 +1,66 @@
+name: Website HTML Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Website URL (http:// or https://)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate URL
+        env:
+          TARGET_URL: ${{ inputs.url }}
+        run: |
+          python - <<'PY'
+          import ipaddress, os, sys
+          from urllib.parse import urlparse
+
+          url = os.environ["TARGET_URL"].strip()
+          p = urlparse(url)
+          if p.scheme not in ("http", "https") or not p.hostname:
+              sys.exit("URL must start with http:// or https://")
+          host = p.hostname.lower()
+          if host in ("localhost", "localhost.localdomain") or host.endswith(".localhost"):
+              sys.exit("Localhost URLs are not allowed")
+          try:
+              ip = ipaddress.ip_address(host)
+              if not ip.is_global:
+                  sys.exit("Private or reserved IP addresses are not allowed")
+          except ValueError:
+              pass
+          print("URL accepted")
+          PY
+
+      - name: Fetch HTML
+        env:
+          TARGET_URL: ${{ inputs.url }}
+        run: |
+          mkdir -p output
+          curl --fail --silent --show-error \
+            --max-time 45 --connect-timeout 15 \
+            --max-filesize 15000000 \
+            --user-agent "Begg-HTML-Extractor/1.0" \
+            --output output/page.html \
+            --write-out "HTTP status: %{http_code}\nContent type: %{content_type}\nFinal URL: %{url_effective}\n" \
+            "$TARGET_URL" > output/fetch-info.txt
+          {
+            echo "Requested URL: $TARGET_URL"
+            echo "Fetched at (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
+            cat output/fetch-info.txt
+          } > output/metadata.txt
+
+      - name: Upload HTML artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: extracted-html
+          path: output/
+          retention-days: 7

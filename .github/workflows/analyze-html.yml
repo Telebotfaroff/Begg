@@ -1,4 +1,4 @@
-name: Browser Website Analysis
+name: Obscura Website Analysis
 
 on:
   workflow_dispatch:
@@ -13,124 +13,56 @@ permissions:
 
 jobs:
   analyze:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install Playwright Chromium
+      - name: Install Obscura
         run: |
-          npm install --no-save playwright
-          npx playwright install --with-deps chromium
+          curl -fL --retry 3 https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-x86_64-linux.tar.gz -o obscura.tar.gz
+          tar -xzf obscura.tar.gz
+          chmod +x ./obscura
+          ./obscura --help
 
-      - name: Capture browser-rendered page and diagnostics
+      - name: Run Obscura capture and analysis
         env:
           TARGET_URL: ${{ inputs.url }}
         run: |
+          set -euo pipefail
           mkdir -p analysis
-          cat > capture.cjs <<'NODE'
-          const { chromium } = require('playwright');
-          const fs = require('fs');
-          const crypto = require('crypto');
+          URL="$TARGET_URL"
+          if [[ ! "$URL" =~ ^https?:// ]]; then echo "Invalid URL"; exit 1; fi
+          ./obscura fetch "$URL" --wait-until networkidle0 --timeout 60 --dump html --output analysis/rendered.html
+          ./obscura fetch "$URL" --wait-until networkidle0 --timeout 60 --dump text --output analysis/page-text.txt
+          ./obscura fetch "$URL" --wait-until networkidle0 --timeout 60 --dump links --output analysis/links.txt
+          ./obscura fetch "$URL" --wait-until networkidle0 --timeout 60 --dump assets --output analysis/assets.ndjson
+          ./obscura fetch "$URL" --wait-until networkidle0 --timeout 60 --eval "JSON.stringify({title:document.title,url:location.href,text:(document.body?.innerText||'').slice(0,30000),links:[...document.querySelectorAll('a')].slice(0,500).map(a=>({text:(a.innerText||'').trim().slice(0,160),href:a.href})),images:[...document.querySelectorAll('img')].slice(0,500).map(i=>({src:i.src,alt:i.alt,className:i.className})),videos:[...document.querySelectorAll('video,source,iframe')].slice(0,250).map(e=>({tag:e.tagName,src:e.src||e.getAttribute('src')||'',className:e.className||''})),scripts:[...document.scripts].map(s=>s.src||'inline').slice(0,200)})" --output analysis/dom-report.json
+          ./obscura fetch "$URL" --wait-until networkidle0 --timeout 60 --screenshot analysis/page.png || echo "Screenshot unavailable; continuing."
+          python - <<'PY'
+          import json, os, hashlib, datetime
+          p='analysis/rendered.html'
+          raw=open(p,'rb').read() if os.path.exists(p) else b''
+          summary={'generated_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'engine':'Obscura only (no Playwright/Chromium)','html_bytes':len(raw),'html_sha256':hashlib.sha256(raw).hexdigest() if raw else None,'files':sorted(os.listdir('analysis'))}
+          with open('analysis/summary.json','w') as f: json.dump(summary,f,indent=2)
+          print(json.dumps(summary,indent=2))
+          PY
 
-          const target = process.env.TARGET_URL;
-          if (!/^https?:\/\//i.test(target)) throw new Error('Please provide an http(s) URL.');
-
-          const safeUrl = (raw) => {
-            try {
-              const u = new URL(raw);
-              return { url: u.origin + u.pathname, queryKeys: [...u.searchParams.keys()] };
-            } catch { return { url: String(raw).slice(0, 300), queryKeys: [] }; }
-          };
-
-          (async () => {
-            const browser = await chromium.launch({ headless: true });
-            const page = await browser.newPage({ viewport: { width: 1365, height: 900 } });
-            const requests = [];
-            const failures = [];
-            const responses = [];
-            page.on('request', req => {
-              requests.push({ method: req.method(), resourceType: req.resourceType(), ...safeUrl(req.url()) });
-            });
-            page.on('requestfailed', req => failures.push({ method: req.method(), resourceType: req.resourceType(), ...safeUrl(req.url()), error: req.failure()?.errorText }));
-            page.on('response', res => {
-              responses.push({ status: res.status(), resourceType: res.request().resourceType(), ...safeUrl(res.url()), contentType: res.headers()['content-type'] || '' });
-            });
-            const consoleErrors = [];
-            page.on('console', msg => { if (msg.type() === 'error') consoleErrors.push(msg.text().slice(0, 500)); });
-            const pageErrors = [];
-            page.on('pageerror', err => pageErrors.push(err.message.slice(0, 500)));
-
-            const nav = await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60000 });
-            await page.waitForTimeout(12000);
-            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-            await page.waitForTimeout(2500);
-            const renderedHtml = await page.content();
-            const dom = await page.evaluate(() => {
-              const title = document.title;
-              const text = (document.body?.innerText || '').slice(0, 30000);
-              const elements = [...document.querySelectorAll('a, img, video, source, iframe')].map(el => ({
-                tag: el.tagName.toLowerCase(),
-                text: (el.innerText || el.getAttribute('alt') || '').trim().slice(0, 160),
-                class: String(el.className || '').slice(0, 250),
-                src: el.getAttribute('src') || '',
-                href: el.getAttribute('href') || '',
-                attrs: [...el.attributes].map(a => a.name)
-              })).slice(0, 1000);
-              const classes = {};
-              document.querySelectorAll('*').forEach(el => {
-                for (const c of el.classList || []) classes[c] = (classes[c] || 0) + 1;
-              });
-              return { title, text, elements, topClasses: Object.entries(classes).sort((a,b) => b[1]-a[1]).slice(0,150) };
-            });
-
-            const report = {
-              generatedAt: new Date().toISOString(),
-              target: safeUrl(target),
-              finalUrl: safeUrl(page.url()),
-              status: nav?.status() || null,
-              htmlBytes: Buffer.byteLength(renderedHtml),
-              htmlSha256: crypto.createHash('sha256').update(renderedHtml).digest('hex'),
-              dom,
-              requestCount: requests.length,
-              responseCount: responses.length,
-              requests,
-              responses,
-              requestFailures: failures,
-              consoleErrors,
-              pageErrors,
-              note: 'Query values are omitted from URL records; query parameter names are retained for diagnostic context.'
-            };
-            fs.writeFileSync('analysis/browser-report.json', JSON.stringify(report, null, 2));
-            fs.writeFileSync('analysis/rendered.html', renderedHtml);
-            fs.writeFileSync('analysis/page-text.txt', dom.text);
-            fs.writeFileSync('analysis/requests.json', JSON.stringify({ requests, responses, failures }, null, 2));
-            console.log('Browser capture finished. HTML bytes:', report.htmlBytes, 'DOM elements:', dom.elements.length, 'requests:', requests.length, 'responses:', responses.length);
-            await browser.close();
-          })().catch(e => { console.error(e); process.exit(1); });
-          NODE
-          node capture.cjs
-
-      - name: Upload browser capture artifact
+      - name: Upload Obscura analysis artifact
         uses: actions/upload-artifact@v4
         with:
-          name: begg-browser-capture
+          name: begg-obscura-analysis
           path: analysis/
           retention-days: 7
 
-      - name: Commit sanitized report
+      - name: Commit reports
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add analysis/browser-report.json analysis/page-text.txt analysis/requests.json
+          git add analysis/page-text.txt analysis/links.txt analysis/assets.ndjson analysis/dom-report.json analysis/summary.json
           if git diff --cached --quiet; then
-            echo "Report unchanged."
+            echo "Reports unchanged."
           else
-            git commit -m "Update browser website analysis"
+            git commit -m "Update Obscura website analysis"
             git push
           fi

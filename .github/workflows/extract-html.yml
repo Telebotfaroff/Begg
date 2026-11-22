@@ -9,13 +9,16 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   extract:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Validate URL
         env:
           TARGET_URL: ${{ inputs.url }}
@@ -44,23 +47,28 @@ jobs:
         env:
           TARGET_URL: ${{ inputs.url }}
         run: |
-          mkdir -p output
+          mkdir -p extracted_html
           curl --fail --silent --show-error \
             --max-time 45 --connect-timeout 15 \
             --max-filesize 15000000 \
             --user-agent "Begg-HTML-Extractor/1.0" \
-            --output output/page.html \
+            --output extracted_html/page.html \
             --write-out "HTTP status: %{http_code}\nContent type: %{content_type}\nFinal URL: %{url_effective}\n" \
-            "$TARGET_URL" > output/fetch-info.txt
+            "$TARGET_URL" > extracted_html/fetch-info.txt
           {
             echo "Requested URL: $TARGET_URL"
             echo "Fetched at (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
-            cat output/fetch-info.txt
-          } > output/metadata.txt
+            cat extracted_html/fetch-info.txt
+          } > extracted_html/metadata.txt
 
-      - name: Upload HTML artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: extracted-html
-          path: output/
-          retention-days: 7
+      - name: Commit HTML output to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add extracted_html/
+          if git diff --cached --quiet; then
+            echo "Output unchanged; no commit created."
+          else
+            git commit -m "Update extracted HTML output"
+            git push
+          fi

@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-11-22T07:50:07.299963+00:00",
+  "engine": "Obscura only (no Playwright/Chromium)",
+  "html_bytes": 695156,
+  "html_sha256": "7a83f540af57b5efbf904a3b3d6aa32617cc2a663f4b93e8ee545d6e4ad8ef29",
+  "files": [
+    "assets.ndjson",
+    "dom-report.json",
+    "latest.json",
+    "latest.md",
+    "links.txt",
+    "page-text.txt",
+    "page.png",
+    "rendered.html"
+  ]
+}

@@ -82,7 +82,7 @@ async def start_wzgram() -> WZClient:
 
 async def send_progress(message: Message, text: str) -> None:
     try:
-        await message.edit_text(text, reply_markup=main_menu())
+        await message.edit_text(text)
     except Exception:
         pass
 
@@ -201,7 +201,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
             "✨ <b>Transfer complete</b>\n"
             f"<blockquote>{actual_title[:180]}</blockquote>\n"
             f"📦 {pretty_size(size)}\n"
-            "📤 Sent to your Saved Messages.",
+            "📤 Sent to your Telegram chat.",
         )
     except asyncio.CancelledError:
         await send_progress(status, "⏹️ <b>Task cancelled.</b>")

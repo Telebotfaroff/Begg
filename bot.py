@@ -25,6 +25,7 @@ from wzgram import Client as WZClient
 from config import settings
 from services.eporner import clean_video_url as clean_eporner_video_url, fetch_category_videos as fetch_eporner_category_videos, get_video as get_eporner_video, is_category_url as is_eporner_category_url, search_videos as search_eporner_videos
 from services.providers import PROVIDERS, DEFAULT_PROVIDER, get_spec, get_video as get_generic_video, make_download_config, provider_for_url, search_videos as search_generic_videos
+from services.provider_health import check_all_providers
 from ui.keyboards import main_menu, gallery_keyboard, settings_keyboard, provider_picker_keyboard
 
 logging.basicConfig(
@@ -658,19 +659,98 @@ async def system_monitor_button(call: CallbackQuery):
     await call.answer()
 
 
+def build_settings_text() -> str:
+    return (
+        "⚙️ <b>BEGG runtime settings</b>\n\n"
+        f"⬇️ Download slots: <b>{settings.download_concurrency}</b> / 5\n"
+        f"📤 Upload slots: <b>{settings.upload_concurrency}</b> / 2\n"
+        f"🎞 Quality: <b>{html.escape(settings.video_quality)}</b>\n"
+        f"🔄 Progress refresh: <b>{settings.update_interval}s</b>\n\n"
+        "Changes apply to this runtime only. Slot changes are locked while tasks are active."
+    )
+
+
+def settings_markup():
+    return settings_keyboard(
+        settings.video_quality,
+        settings.download_concurrency,
+        settings.upload_concurrency,
+        settings.update_interval,
+        bool(active_downloads),
+    )
+
+
 @router.callback_query(F.data == "menu:settings")
 async def settings_button(call: CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Not authorized", show_alert=True)
-    await call.message.edit_text(
-        "⚙️ <b>Bot settings</b>\n\n"
-        f"⬇️ Download slots: <b>{settings.download_concurrency}</b>\n"
-        f"📤 Upload slots: <b>{settings.upload_concurrency}</b>\n"
-        f"🎞 Quality: <b>{settings.video_quality}</b>\n"
-        f"🔄 Progress refresh: <b>{settings.update_interval}s</b>",
-        reply_markup=settings_keyboard(),
-    )
+    await call.message.edit_text(build_settings_text(), reply_markup=settings_markup())
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("settings:"))
+async def update_runtime_setting(call: CallbackQuery):
+    global download_slots, upload_slots
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+
+    try:
+        _, setting_name, raw_value = call.data.split(":", 2)
+        value = int(raw_value) if setting_name in {"downloads", "uploads", "interval"} else raw_value
+    except (ValueError, TypeError):
+        return await call.answer("Invalid setting.", show_alert=True)
+
+    if setting_name == "quality":
+        if value not in {"best", "half", "worst"}:
+            return await call.answer("Unsupported quality preset.", show_alert=True)
+        settings.video_quality = value
+    elif setting_name in {"downloads", "uploads"}:
+        if active_downloads:
+            return await call.answer("Finish or cancel active tasks before changing concurrency.", show_alert=True)
+        if setting_name == "downloads":
+            if not 1 <= value <= 5:
+                return await call.answer("Download slots must be 1–5.", show_alert=True)
+            settings.download_concurrency = value
+            download_slots = asyncio.Semaphore(value)
+        else:
+            if not 1 <= value <= 2:
+                return await call.answer("Upload slots must be 1–2.", show_alert=True)
+            settings.upload_concurrency = value
+            upload_slots = asyncio.Semaphore(value)
+    elif setting_name == "interval":
+        if value not in {2, 3, 5, 10}:
+            return await call.answer("Choose a listed refresh interval.", show_alert=True)
+        settings.update_interval = value
+    else:
+        return await call.answer("Unknown setting.", show_alert=True)
+
+    await call.message.edit_text(build_settings_text(), reply_markup=settings_markup())
+    await call.answer("Setting updated for this runtime.")
+
+
+@router.callback_query(F.data.in_({"menu:health", "health:refresh"}))
+async def provider_health_button(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    await call.answer("Checking installed provider APIs…")
+    await call.message.edit_text("🩺 <b>Provider health</b>\n\nChecking installed packages and API methods…")
+    results = await check_all_providers()
+    icons = {"ready": "🟢", "missing": "🔴", "incomplete": "🟠"}
+    lines = ["🩺 <b>Provider health report</b>", ""]
+    for item in results:
+        lines.append(f"{icons.get(item.status, '⚪')} <b>{html.escape(item.name)}</b> — {item.status}")
+        lines.append(f"   <i>{html.escape(item.detail)}</i>")
+    ready = sum(item.status == "ready" for item in results)
+    missing = sum(item.status == "missing" for item in results)
+    incomplete = sum(item.status == "incomplete" for item in results)
+    lines.extend(["", f"🟢 Ready: <b>{ready}</b>  🔴 Missing: <b>{missing}</b>  🟠 Incomplete: <b>{incomplete}</b>",
+                  "", "<i>Package/API capability check only; this does not verify live website availability.</i>"])
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Run check again", callback_data="health:refresh")
+    kb.button(text="⚙️ Settings", callback_data="menu:settings")
+    kb.button(text="🏠 Main menu", callback_data="menu:home")
+    kb.adjust(1)
+    await call.message.edit_text("\n".join(lines), reply_markup=kb.as_markup())
 
 
 async def render_gallery(message: Message, item: dict, index: int, total: int) -> Message:

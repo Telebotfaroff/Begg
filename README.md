@@ -15,7 +15,6 @@ The source picker includes the 16 providers not flagged as API failures in the d
 - YouPorn
 - XFreeHD
 - HQPorner
-- MissAV
 - RedTube
 - Tube8
 - Thumbzilla

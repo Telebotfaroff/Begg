@@ -676,7 +676,6 @@ def settings_markup():
         settings.download_concurrency,
         settings.upload_concurrency,
         settings.update_interval,
-        bool(active_downloads),
     )
 
 

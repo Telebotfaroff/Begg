@@ -24,6 +24,7 @@ from base_api import DownloadConfigHLS
 from wzgram import Client as WZClient
 from config import settings
 from services.beeg import search_videos, format_duration, clean_video_url
+from services.beeg_html import fetch_category_videos, is_category_url
 from ui.keyboards import main_menu, gallery_keyboard, settings_keyboard
 
 logging.basicConfig(
@@ -420,10 +421,20 @@ async def settings_button(call: CallbackQuery):
 
 
 async def render_gallery(message: Message, item: dict, index: int, total: int) -> Message:
+    details = []
+    if item.get("creator"):
+        details.append(f"👤 {html.escape(str(item['creator'])[:80])}")
+    if item.get("duration"):
+        details.append(f"⏱ {html.escape(str(item['duration'])[:20])}")
+    if item.get("views"):
+        details.append(f"👁 {html.escape(str(item['views'])[:24])}")
+    if item.get("uploaded"):
+        details.append(f"🕒 {html.escape(str(item['uploaded'])[:24])}")
     caption = (
         f"🎬 <b>{html.escape(item['title'][:180])}</b>\n"
-        f"🆔 <code>{html.escape(item['video_id'])}</code>\n"
-        f"📍 <b>Result {index + 1} of {total}</b>"
+        + ("\n".join(details) + "\n" if details else "")
+        + f"🆔 <code>{html.escape(item['video_id'])}</code>\n"
+        + f"📍 <b>Result {index + 1} of {total}</b>"
     )
     markup = gallery_keyboard(index, total, item["url"])
     has_photo = bool(message.photo)
@@ -502,7 +513,34 @@ async def process_search(message: Message, state: FSMContext):
 
     wait = await message.answer(f"🔎 <b>Searching Beeg…</b>\n<code>{html.escape(query[:100])}</code>")
     try:
-        results = await search_videos(query, settings.search_limit)
+        if is_category_url(query):
+            category_items = await fetch_category_videos(query, limit=settings.search_limit)
+            results = category_items
+            serializable = [
+                {
+                    "title": item.title,
+                    "url": item.url,
+                    "video_id": item.video_id,
+                    "thumbnail": item.thumbnail,
+                    "creator": item.creator,
+                    "creator_url": item.creator_url,
+                    "duration": item.duration,
+                    "views": item.views,
+                    "uploaded": item.uploaded,
+                }
+                for item in category_items
+            ]
+        else:
+            results = await search_videos(query, settings.search_limit)
+            serializable = [
+                {
+                    "title": item.title,
+                    "url": item.url,
+                    "video_id": item.video_id,
+                    "thumbnail": item.thumbnail,
+                }
+                for item in results
+            ]
     except Exception as exc:
         log.exception("Search failed")
         await wait.edit_text(f"⚠️ Search failed: <code>{html.escape(str(exc)[:500])}</code>", reply_markup=main_menu())
@@ -515,21 +553,22 @@ async def process_search(message: Message, state: FSMContext):
         )
         return
 
-    serializable = [
-        {
-            "title": item.title,
-            "url": item.url,
-            "video_id": item.video_id,
-            "thumbnail": item.thumbnail,
-        }
-        for item in results
-    ]
     await state.update_data(search_results=serializable, search_index=0)
     first = serializable[0]
+    details = []
+    if first.get("creator"):
+        details.append(f"👤 {html.escape(str(first['creator'])[:80])}")
+    if first.get("duration"):
+        details.append(f"⏱ {html.escape(str(first['duration'])[:20])}")
+    if first.get("views"):
+        details.append(f"👁 {html.escape(str(first['views'])[:24])}")
+    if first.get("uploaded"):
+        details.append(f"🕒 {html.escape(str(first['uploaded'])[:24])}")
     caption = (
         f"🎬 <b>{html.escape(first['title'][:180])}</b>\n"
-        f"🆔 <code>{html.escape(first['video_id'])}</code>\n"
-        f"📍 <b>Result 1 of {len(serializable)}</b>"
+        + ("\n".join(details) + "\n" if details else "")
+        + f"🆔 <code>{html.escape(first['video_id'])}</code>\n"
+        + f"📍 <b>Result 1 of {len(serializable)}</b>"
     )
     markup = gallery_keyboard(0, len(serializable), first["url"])
     if first.get("thumbnail"):

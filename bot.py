@@ -472,7 +472,8 @@ async def start(message: Message, state: FSMContext):
         "Welcome back! Choose an action below.\n\n"
         "🔎 <b>Search</b> videos from the selected source or paste a video link\n"
         f"🔁 <b>Source</b> choose from {len(PROVIDERS)} video APIs\n"
-        "📊 <b>Tasks</b> view current activity",
+        "📊 <b>Tasks</b> monitor and control transfers\\n"
+        "🖥️ <b>System</b> inspect runtime resources",
         reply_markup=main_menu(ACTIVE_PROVIDER),
     )
 

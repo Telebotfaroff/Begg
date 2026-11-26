@@ -7,6 +7,7 @@ A private, admin-only Telegram bot with a polished inline interface, Beeg metada
 ## Features
 
 - Admin ID allowlist; all other users are rejected.
+- Search results shown as a thumbnail gallery with Previous/Next navigation, result counter, Beeg link, and one-tap download.
 - Aiogram 3 Bot API for the interface.
 - Official Beeg API for video metadata (`title`, `duration`, `author`, `tags`, `publish_date`, and `thumbnail`) and HLS downloads.
 - WZGram bot-authenticated MTProto client for uploads (no personal Telegram session).

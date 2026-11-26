@@ -25,7 +25,6 @@ PROVIDERS: dict[str, ProviderSpec] = {
     "youporn": ProviderSpec("youporn", "YouPorn", "youporn_api", ("youporn.com",), "hls"),
     "xfreehd": ProviderSpec("xfreehd", "XFreeHD", "xfreehd_api", ("xfreehd.com",), "raw"),
     "hqporner": ProviderSpec("hqporner", "HQPorner", "hqporner_api", ("hqporner.com",), "raw"),
-    "missav": ProviderSpec("missav", "MissAV", "missav_api", ("missav.com",), "hls"),
     "redtube": ProviderSpec("redtube", "RedTube", "redtube_api", ("redtube.com",), "hls"),
     "tube8": ProviderSpec("tube8", "Tube8", "tube8_api", ("tube8.com",), "hls"),
     "thumbzilla": ProviderSpec("thumbzilla", "Thumbzilla", "thumbzilla_api", ("thumbzilla.com",), "hls"),

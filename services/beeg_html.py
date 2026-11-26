@@ -84,7 +84,8 @@ def parse_category_html(
         if info:
             text_blocks = info.select("div.tw-flex.tw-flex-col > div")
             if text_blocks:
-                creator = _text(text_blocks[0])
+                creator_node = text_blocks[0].find(string=True, recursive=False)
+                creator = str(creator_node).strip() if creator_node else _text(text_blocks[0])
 
         stats: list[str] = []
         if info:

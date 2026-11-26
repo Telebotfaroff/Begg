@@ -8,6 +8,7 @@ A private, admin-only Telegram bot with a polished inline interface, Beeg metada
 
 - Admin ID allowlist; all other users are rejected.
 - Search results use Beeg's frontend WebSocket search service and are shown as a thumbnail gallery with Previous/Next navigation, result counter, Beeg link, and one-tap download.
+- Paste a Beeg category, tag, or creator page URL to parse the video cards returned in that page's HTML; gallery cards include creator, duration, views, upload age, and thumbnail when present.
 - Aiogram 3 Bot API for the interface.
 - Official Beeg API for video metadata (`title`, `duration`, `author`, `tags`, `publish_date`, and `thumbnail`) and HLS downloads.
 - WZGram bot-authenticated MTProto client for uploads (no personal Telegram session).
@@ -57,7 +58,7 @@ The bot uses compact inline navigation, clear task states, separate download/upl
 
 ## Notes
 
-- The official Beeg API provides video lookup through `Client.get_video(url)`. HLS configuration is imported from `base_api` and passed as `video.download(configuration=config)`. Keyword search is not part of the documented API, so it remains isolated in `services/beeg.py` as a separate HTML search adapter; validate the current search-page response during the first live run.
+- The official Beeg API provides video lookup through `Client.get_video(url)`. HLS configuration is imported from `base_api` and passed as `video.download(configuration=config)`. Keyword search is not part of the documented API, so it remains isolated in `services/beeg.py` as a separate frontend WebSocket adapter. Category-page parsing is isolated in `services/beeg_html.py` and extracts only cards present in the fetched HTML; it does not assume an undocumented infinite-scroll endpoint.
 - HLS downloads do not always expose a reliable total size before completion. During that phase the bot reports bytes downloaded and live speed; final size is shown after completion.
 - Before upload, FFmpeg/ffprobe prepares an MP4 with `+faststart`. Compatible H.264/AAC files are remuxed without re-encoding; other codecs/containers are normalized to H.264/AAC. The uploader sends the measured duration, width, height, a generated JPEG thumbnail, and `supports_streaming=True`. This preparation requires `ffmpeg` and `ffprobe` to be available in the runtime (both are normally available in Google Colab).
 - The WZGram uploader authenticates with the bot token and Telegram API credentials; no phone number, OTP, 2FA, or user session is used.

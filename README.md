@@ -1,28 +1,60 @@
-# BEGG — Personal ePorner-first Telegram Bot
+# BEGG — Multi-source Personal Telegram Video Bot
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Telebotfaroff/Begg/blob/main/BEGG_Colab.ipynb)
 
-A private, admin-only Telegram bot with ePorner as its primary provider, Beeg as a selectable secondary provider, a polished inline gallery, and WZGram MTProto uploads.
+A private, admin-only Telegram bot using the video API projects published by [EchterAlsFake](https://github.com/EchterAlsFake). **Pornhub is intentionally excluded.** ePorner is the default source.
+
+## Providers
+
+The source picker includes these providers:
+
+- ePorner
+- Beeg
+- XVideos
+- XNXX
+- xHamster
+- YouPorn
+- XFreeHD
+- HQPorner
+- MissAV
+- PornTrex
+- SpankBang
+- RedTube
+- Tube8
+- Thumbzilla
+- TNAFlix
+- Bellesa
+- Empflix
+- PornDoe
+- PornGo
+- PornHat
+- Sex.com
+- YouJizz
+- RedGIFs
+- Porn.com
+
+The integrations use the corresponding upstream Python packages. Search and download capabilities vary by API; providers without a compatible search or download method report a clear provider-specific error rather than silently switching sources.
 
 ## Features
 
-- Admin ID allowlist; all other users are rejected.
-- ePorner is the default source for keyword search, category browsing, metadata and direct video downloads.
-- Switch providers from the main menu; Beeg remains available as a secondary source.
-- No silent fallback: empty or failed ePorner searches stay on ePorner until you manually switch to Beeg.
-- Thumbnail gallery with Previous/Next navigation, result counter, provider link, metadata and one-tap download.
-- Beeg keyword search, category/creator page parsing, metadata and HLS downloads.
+- Admin ID allowlist; other users are rejected.
+- Paginated source picker with ePorner selected by default.
+- Direct video URLs are routed to the matching provider automatically.
+- Search results use one shared gallery with thumbnail, metadata, Previous/Next and one-tap download.
+- Each gallery item retains its original provider.
+- Shared download validation with FFprobe; invalid or incomplete output is rejected before upload.
+- ePorner download result is checked and an invalid download is retried once.
 - Aiogram 3 Bot API for the interface.
-- WZGram bot-authenticated MTProto client for uploads (no personal Telegram session).
-- 5 concurrent downloads and 2 concurrent uploads.
-- Download and upload status messages with size, speed and ETA where available.
-- Telegram-ready MP4 uploads: H.264 video, AAC audio when present, MP4 faststart, measured duration/dimensions, generated JPEG thumbnail, and streaming enabled.
+- WZGram bot-authenticated MTProto uploads; no personal Telegram session.
+- Up to 5 concurrent downloads and 2 concurrent uploads.
+- Progress messages show file size, speed and ETA where available.
+- Telegram-ready MP4 preparation, metadata and JPEG thumbnail.
 - In-memory task tracking; no database.
 - Automatic temporary-file cleanup.
 
 ## Setup
 
-Python 3.12 or newer is required by both provider API packages.
+Python 3.12 or newer is recommended.
 
 ```bash
 git clone https://github.com/Telebotfaroff/Begg.git
@@ -31,16 +63,16 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Fill in `.env`:
+Set these values in `.env`:
 
 | Variable | Description |
 |---|---|
-| `BOT_TOKEN` | Bot token from BotFather |
+| `BOT_TOKEN` | Telegram bot token |
 | `API_ID` | Telegram API ID |
 | `API_HASH` | Telegram API hash |
 | `ADMIN_ID` | Your numeric Telegram user ID |
-| `DOWNLOAD_CONCURRENCY` | Maximum 5 |
-| `UPLOAD_CONCURRENCY` | Maximum 2 |
+| `DOWNLOAD_CONCURRENCY` | Download slots (maximum 5) |
+| `UPLOAD_CONCURRENCY` | Upload slots (maximum 2) |
 | `VIDEO_QUALITY` | `best`, `half`, `worst`, or a supported resolution |
 
 Run:
@@ -51,15 +83,14 @@ python bot.py
 
 ## Google Colab
 
-Open the [BEGG Colab notebook](https://colab.research.google.com/github/Telebotfaroff/Begg/blob/main/BEGG_Colab.ipynb). Add `BOT_TOKEN`, `API_ID`, `API_HASH`, and `ADMIN_ID` under Colab Secrets, enable notebook access to secrets, and run the cells. Keep the Colab runtime active while the bot is running.
+Open the [BEGG Colab notebook](https://colab.research.google.com/github/Telebotfaroff/Begg/blob/main/BEGG_Colab.ipynb). Add `BOT_TOKEN`, `API_ID`, `API_HASH`, and `ADMIN_ID` under Colab Secrets, enable notebook access to secrets, and run the cells. The notebook installs all provider dependencies from `requirements.txt`. Keep the Colab runtime active while the bot is running.
 
-## Provider implementation
+## Architecture
 
-- ePorner integration is isolated in `services/eporner.py`. It uses the library's async `Client.search_videos(...)`, `Client.get_videos_by_category(...)`, `Client.get_video(...)`, and `DownloadConfigRAW` + H.264 download mode.
-- Beeg integration remains isolated in `services/beeg.py` and `services/beeg_html.py`. It uses the Beeg API's HLS downloader.
-- Provider selection is global for this single-admin personal bot. Each search result also stores its provider, so gallery navigation and downloads continue using the correct source.
-- The ePorner library's API listing returns async scrape results; each result is unwrapped before the bot maps its metadata into the common gallery format.
+- `services/providers.py`: provider registry, dynamic API clients, common metadata mapping, URL detection and generic download configuration.
+- `services/eporner.py`: ePorner-specific URL parsing and search/category integration.
+- `services/beeg.py` and `services/beeg_html.py`: Beeg-specific search and category handling.
+- `ui/keyboards.py`: paginated provider selector and common gallery controls.
+- `bot.py`: Telegram UI, download validation, media preparation and WZGram uploads.
 
-## Transfer pipeline
-
-Before upload, FFmpeg/ffprobe prepares an MP4 with `+faststart`. Compatible H.264/AAC files are remuxed without re-encoding; other codecs/containers are normalized to H.264/AAC. The uploader sends measured duration, width, height, a generated JPEG thumbnail, and `supports_streaming=True`. This requires `ffmpeg` and `ffprobe` to be available in the runtime (both are normally available in Google Colab).
+Each provider is isolated by its own API package. The shared bot pipeline handles the resulting media consistently. Pornhub is not installed, listed or selectable.

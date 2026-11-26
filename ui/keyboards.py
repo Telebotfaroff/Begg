@@ -11,13 +11,20 @@ def main_menu() -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def search_result_keyboard(url: str, index: int) -> InlineKeyboardMarkup:
+def gallery_keyboard(index: int, total: int, url: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    video_id = url.rstrip("/").split("/")[-1].lstrip("-0")
-    kb.button(text=f"⬇️  Download #{index}", callback_data=f"get:{video_id}")
-    kb.button(text="↗️  Open on Beeg", url=url)
-    kb.adjust(1, 1)
+    kb.button(text="◀️ Previous", callback_data="gallery:prev")
+    kb.button(text=f"{index + 1} / {total}", callback_data="gallery:page")
+    kb.button(text="Next ▶️", callback_data="gallery:next")
+    kb.button(text="⬇️ Download this video", callback_data="gallery:download")
+    kb.button(text="↗️ Open on Beeg", url=url)
+    kb.button(text="🏠 Main menu", callback_data="menu:home")
+    kb.adjust(3, 1, 1, 1)
     return kb.as_markup()
+
+
+def search_result_keyboard(url: str, index: int) -> InlineKeyboardMarkup:
+    return gallery_keyboard(index - 1, index, url)
 
 
 def video_actions(url: str) -> InlineKeyboardMarkup:

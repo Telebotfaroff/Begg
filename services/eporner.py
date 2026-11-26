@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from urllib.parse import urlsplit
 
 from eporner_api import Client
@@ -23,31 +24,30 @@ client = Client()
 
 
 def clean_video_url(value: str) -> str | None:
+    """Normalize ePorner video URLs accepted by the upstream API."""
     value = value.strip()
-    if not value.startswith(("https://", "http://")):
+    if not value:
         return None
     try:
-        parsed = urlsplit(value)
+        parsed = urlsplit(value if "://" in value else f"https://{value}")
     except ValueError:
         return None
-    if (parsed.hostname or "").lower() not in {"eporner.com", "www.eporner.com"}:
+
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if host != "eporner.com" and not host.endswith(".eporner.com"):
         return None
-    parts = [part for part in parsed.path.split("/") if part]
-    if not parts:
+
+    # Match the URL formats supported by eporner_api.api.Video:
+    # /video-ID/, /hd-porn/ID/, /embed/ID/, and /porno-video/ID/.
+    match = re.match(
+        r"/(?:video-|hd-porn/|embed/|porno-video/)([A-Za-z0-9]+)(?:/|$)",
+        parsed.path,
+        flags=re.IGNORECASE,
+    )
+    if not match:
         return None
-    video_id = None
-    for prefix in ("video-", "hd-porn", "embed", "porno-video"):
-        for index, part in enumerate(parts):
-            if part.startswith(prefix + "-"):
-                video_id = part[len(prefix) + 1:]
-                break
-            if part == prefix and index + 1 < len(parts):
-                video_id = parts[index + 1]
-                break
-        if video_id:
-            break
-    if not video_id or not video_id.isalnum():
-        return None
+
+    video_id = match.group(1)
     return f"https://www.eporner.com/video-{video_id}/"
 
 

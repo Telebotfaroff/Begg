@@ -8,7 +8,7 @@ A private, admin-only Telegram bot with a polished inline interface, Beeg metada
 
 - Admin ID allowlist; all other users are rejected.
 - Aiogram 3 Bot API for the interface.
-- Beeg API for video metadata and HLS downloads.
+- Official Beeg API for video metadata (`title`, `duration`, `author`, `tags`, `publish_date`, and `thumbnail`) and HLS downloads.
 - WZGram bot-authenticated MTProto client for uploads (no personal Telegram session).
 - 5 concurrent downloads and 2 concurrent uploads.
 - Download and upload status messages with size, speed and ETA where available.
@@ -55,6 +55,6 @@ The bot uses compact inline navigation, clear task states, separate download/upl
 
 ## Notes
 
-- The Beeg metadata library provides video lookup by URL. Keyword search is isolated in `services/beeg.py` as an HTML search adapter because keyword search is not part of the library's documented `Client` API; the first live run should validate the site's current search-page response.
+- The official Beeg API provides video lookup through `Client.get_video(url)`. HLS configuration is imported from `base_api` and passed as `video.download(configuration=config)`. Keyword search is not part of the documented API, so it remains isolated in `services/beeg.py` as a separate HTML search adapter; validate the current search-page response during the first live run.
 - HLS downloads do not always expose a reliable total size before completion. During that phase the bot reports bytes downloaded and live speed; final size is shown after completion.
 - The WZGram uploader authenticates with the bot token and Telegram API credentials; no phone number, OTP, 2FA, or user session is used.

@@ -43,6 +43,8 @@ The integrations use the corresponding upstream Python packages. Providers that 
 - In-memory task tracking; no database or persistent history.
 - Task monitor with per-task cancellation and cancel-all controls.
 - System monitor with runtime, memory, disk, CPU-core and load information.
+- Interactive in-memory settings for quality, download/upload concurrency and progress refresh interval.
+- Provider health dashboard checks installed API packages, client initialization and required search/video methods.
 - Automatic temporary-file cleanup.
 
 ## Setup
@@ -82,7 +84,8 @@ Open the [BEGG Colab notebook](https://colab.research.google.com/github/Telebotf
 
 - `services/providers.py`: provider registry, dynamic API clients, common metadata mapping, URL detection and generic download configuration.
 - `services/eporner.py`: ePorner-specific URL parsing and search/category integration.
-- `ui/keyboards.py`: paginated provider selector and common gallery controls.
+- `ui/keyboards.py`: paginated provider selector, interactive settings and common gallery controls.
+- `services/provider_health.py`: local provider package and API capability diagnostics (not a live website uptime test).
 - `bot.py`: Telegram UI, in-memory task manager, system monitor, download validation, media preparation and WZGram uploads.
 
 Each provider is isolated by its own API package. The shared bot pipeline handles the resulting media consistently. Pornhub is not installed, listed or selectable.

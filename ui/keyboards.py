@@ -27,7 +27,7 @@ def provider_picker_keyboard(active: str, page: int = 0) -> InlineKeyboardMarkup
     if page_count > 1:
         if page > 0:
             kb.button(text="◀️ Previous", callback_data=f"provider:page:{page - 1}")
-        kb.button(text=f"{page + 1}/{page_count}", callback_data=f"provider:page:{page}")
+        kb.button(text=f"{page + 1}/{page_count}", callback_data="provider:noop")
         if page < page_count - 1:
             kb.button(text="Next ▶️", callback_data=f"provider:page:{page + 1}")
         kb.adjust(2, 2, 2, 2, 2)

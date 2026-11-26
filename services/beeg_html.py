@@ -4,6 +4,8 @@ import re
 from dataclasses import asdict, dataclass
 from urllib.parse import urljoin, urlparse
 
+from curl_cffi.requests import AsyncSession
+
 from bs4 import BeautifulSoup, Tag
 
 BEEG_ORIGIN = "https://beeg.com"
@@ -114,3 +116,39 @@ def parse_category_html(
             break
 
     return results
+
+
+def is_category_url(value: str) -> bool:
+    """Return True for a Beeg category/creator/tag page, not a video URL."""
+    try:
+        parsed = urlparse(value.strip())
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"} or (parsed.hostname or "").lower() not in {"beeg.com", "www.beeg.com"}:
+        return False
+    path = parsed.path.strip("/")
+    return bool(path) and _video_id("/" + path) is None
+
+
+async def fetch_category_videos(url: str, *, limit: int = 10) -> list[CategoryVideo]:
+    """Fetch and parse the cards present in the category page's server response.
+
+    This intentionally does not invent an infinite-scroll endpoint. If Beeg
+    returns only its JavaScript shell to a plain HTTP client, callers get an
+    empty result and can still use the saved rendered-page parser.
+    """
+    if not is_category_url(url):
+        raise ValueError("Please provide a Beeg category or creator page URL.")
+    parsed = urlparse(url.strip())
+    canonical = f"https://beeg.com{parsed.path}"
+    if parsed.query:
+        canonical += f"?{parsed.query}"
+    async with AsyncSession(impersonate="chrome") as session:
+        response = await session.get(
+            canonical,
+            headers={"Referer": "https://beeg.com/", "Accept": "text/html,application/xhtml+xml"},
+            timeout=25,
+        )
+        response.raise_for_status()
+        page_html = response.text
+    return parse_category_html(page_html, base_url="https://beeg.com", limit=limit)

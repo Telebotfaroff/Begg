@@ -42,12 +42,15 @@ def format_duration(seconds: int | None) -> str:
 
 
 async def search_videos(query: str, limit: int = 10) -> list[SearchResult]:
-    """Search the site's HTML search route and normalize video cards.
+    """Read Beeg category/tag pages such as https://beeg.com/Teen.
 
-    The Beeg metadata package currently exposes get_video(url), not keyword search;
-    this adapter isolates the site's search-page markup from the downloader.
+    Beeg exposes browse/search collections as path routes, not the assumed
+    /search?q=... endpoint. Keep this adapter independent from the downloader.
     """
-    search_url = f"{BEEG_ORIGIN}/search?q={quote(query)}"
+    term = query.strip().strip("/")
+    if not term:
+        return []
+    search_url = f"{BEEG_ORIGIN}/{quote(term, safe='')}"
     async with AsyncSession(impersonate="chrome") as session:
         response = await session.get(search_url, timeout=30, allow_redirects=True)
         response.raise_for_status()

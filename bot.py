@@ -20,7 +20,7 @@ from aiogram.types import CallbackQuery, Message, BufferedInputFile, InputMediaP
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from beeg_api import Client as BeegClient
-from eporner_api import Client as EpornerClient, DownloadConfigRAW, Encoding as EpornerEncoding
+from eporner_api import DownloadConfigRAW, Encoding as EpornerEncoding
 from base_api import DownloadConfigHLS
 from wzgram import Client as WZClient
 from config import settings
@@ -41,7 +41,6 @@ upload_slots = asyncio.Semaphore(settings.upload_concurrency)
 active_downloads: dict[str, dict] = {}
 ACTIVE_PROVIDER = "eporner"
 beeg = BeegClient()
-eporner = EpornerClient()
 uploader: WZClient | None = None
 
 
@@ -540,7 +539,7 @@ async def process_search(message: Message, state: FSMContext):
         return await deny(message)
     query = (message.text or "").strip()
     if not query:
-        return await message.answer("Please send a search phrase or Beeg URL.")
+        return await message.answer("Please send a search phrase or a supported provider URL.")
     await state.clear()
 
     eporner_url = clean_eporner_video_url(query)

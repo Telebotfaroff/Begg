@@ -6,7 +6,7 @@ A private, admin-only Telegram bot using the video API projects published by [Ec
 
 ## Providers
 
-The source picker includes the 16 providers not flagged as API failures in the diagnostic report:
+The source picker includes 15 providers not flagged as API failures in the diagnostic report:
 
 - ePorner
 - XVideos
@@ -40,7 +40,9 @@ The integrations use the corresponding upstream Python packages. Providers that 
 - Up to 5 concurrent downloads and 2 concurrent uploads.
 - Progress messages show file size, speed and ETA where available.
 - Telegram-ready MP4 preparation, metadata and JPEG thumbnail.
-- In-memory task tracking; no database.
+- In-memory task tracking; no database or persistent history.
+- Task monitor with per-task cancellation and cancel-all controls.
+- System monitor with runtime, memory, disk, CPU-core and load information.
 - Automatic temporary-file cleanup.
 
 ## Setup
@@ -81,6 +83,6 @@ Open the [BEGG Colab notebook](https://colab.research.google.com/github/Telebotf
 - `services/providers.py`: provider registry, dynamic API clients, common metadata mapping, URL detection and generic download configuration.
 - `services/eporner.py`: ePorner-specific URL parsing and search/category integration.
 - `ui/keyboards.py`: paginated provider selector and common gallery controls.
-- `bot.py`: Telegram UI, download validation, media preparation and WZGram uploads.
+- `bot.py`: Telegram UI, in-memory task manager, system monitor, download validation, media preparation and WZGram uploads.
 
 Each provider is isolated by its own API package. The shared bot pipeline handles the resulting media consistently. Pornhub is not installed, listed or selectable.

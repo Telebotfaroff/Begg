@@ -553,7 +553,7 @@ async def process_search(message: Message, state: FSMContext):
 
     provider = ACTIVE_PROVIDER
     provider_name = "ePorner" if provider == "eporner" else "Beeg"
-    wait = await message.answer(f"🔎 <b>Searching {provider_name}…</b>\\n<code>{html.escape(query[:100])}</code>")
+    wait = await message.answer(f"🔎 <b>Searching {provider_name}…</b>\n<code>{html.escape(query[:100])}</code>")
     try:
         if provider == "eporner":
             items = await fetch_eporner_category_videos(query, settings.search_limit) if is_eporner_category_url(query) else await search_eporner_videos(query, settings.search_limit)

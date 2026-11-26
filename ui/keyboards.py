@@ -10,8 +10,9 @@ def main_menu(provider: str = "eporner") -> InlineKeyboardMarkup:
     kb.button(text=f"🔁  Source: {spec.name if spec else provider}", callback_data="menu:provider")
     kb.button(text="📊  Active tasks", callback_data="menu:tasks")
     kb.button(text="🖥️  System monitor", callback_data="menu:system")
+    kb.button(text="🩺  Provider health", callback_data="menu:health")
     kb.button(text="⚙️  Settings", callback_data="menu:settings")
-    kb.adjust(1, 1, 2, 1)
+    kb.adjust(1, 1, 2, 1, 1)
     return kb.as_markup()
 
 
@@ -57,7 +58,18 @@ def video_actions(url: str) -> InlineKeyboardMarkup:
     return search_result_keyboard(url, 1)
 
 
-def settings_keyboard() -> InlineKeyboardMarkup:
+def settings_keyboard(quality: str, downloads: int, uploads: int, interval: int, busy: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠  Main menu", callback_data="menu:home")
+    for value in ("best", "half", "worst"):
+        kb.button(text=f"{'✓ ' if quality == value else ''}Quality: {value}", callback_data=f"settings:quality:{value}")
+    for value in range(1, 6):
+        kb.button(text=f"{'✓ ' if downloads == value else ''}⬇️ {value}", callback_data=f"settings:downloads:{value}")
+    for value in (1, 2):
+        kb.button(text=f"{'✓ ' if uploads == value else ''}📤 {value}", callback_data=f"settings:uploads:{value}")
+    for value in (2, 3, 5, 10):
+        kb.button(text=f"{'✓ ' if interval == value else ''}{value}s", callback_data=f"settings:interval:{value}")
+    kb.button(text="🩺 Provider health", callback_data="menu:health")
+    kb.button(text="🔄 Refresh settings", callback_data="menu:settings")
+    kb.button(text="🏠 Main menu", callback_data="menu:home")
+    kb.adjust(3, 5, 2, 4, 1, 2, 1)
     return kb.as_markup()

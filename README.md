@@ -6,10 +6,9 @@ A private, admin-only Telegram bot using the video API projects published by [Ec
 
 ## Providers
 
-The source picker includes these providers:
+The source picker includes the 16 providers retained after the API smoke tests:
 
 - ePorner
-- Beeg
 - XVideos
 - XNXX
 - xHamster
@@ -17,23 +16,16 @@ The source picker includes these providers:
 - XFreeHD
 - HQPorner
 - MissAV
-- PornTrex
-- SpankBang
 - RedTube
 - Tube8
 - Thumbzilla
 - TNAFlix
 - Bellesa
 - Empflix
-- PornDoe
-- PornGo
 - PornHat
-- Sex.com
 - YouJizz
-- RedGIFs
-- Porn.com
 
-The integrations use the corresponding upstream Python packages. Search and download capabilities vary by API; providers without a compatible search or download method report a clear provider-specific error rather than silently switching sources.
+The integrations use the corresponding upstream Python packages. Providers that failed the API smoke test have been removed from the source picker and dependency list.
 
 ## Features
 
@@ -89,7 +81,6 @@ Open the [BEGG Colab notebook](https://colab.research.google.com/github/Telebotf
 
 - `services/providers.py`: provider registry, dynamic API clients, common metadata mapping, URL detection and generic download configuration.
 - `services/eporner.py`: ePorner-specific URL parsing and search/category integration.
-- `services/beeg.py` and `services/beeg_html.py`: Beeg-specific search and category handling.
 - `ui/keyboards.py`: paginated provider selector and common gallery controls.
 - `bot.py`: Telegram UI, download validation, media preparation and WZGram uploads.
 

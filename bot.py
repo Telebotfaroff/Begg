@@ -470,6 +470,13 @@ async def provider_button(call: CallbackQuery):
     await call.answer()
 
 
+@router.callback_query(F.data == "provider:noop")
+async def provider_noop(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith("provider:page:"))
 async def provider_page(call: CallbackQuery):
     if not is_admin(call.from_user.id):

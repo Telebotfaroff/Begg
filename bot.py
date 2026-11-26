@@ -28,7 +28,8 @@ from config import settings
 from services.beeg import search_videos as search_beeg_videos, format_duration, clean_video_url as clean_beeg_video_url
 from services.beeg_html import fetch_category_videos as fetch_beeg_category_videos, is_category_url as is_beeg_category_url
 from services.eporner import clean_video_url as clean_eporner_video_url, fetch_category_videos as fetch_eporner_category_videos, get_video as get_eporner_video, is_category_url as is_eporner_category_url, search_videos as search_eporner_videos
-from ui.keyboards import main_menu, gallery_keyboard, settings_keyboard
+from services.providers import PROVIDERS, DEFAULT_PROVIDER, get_spec, get_video as get_generic_video, make_download_config, provider_for_url, search_videos as search_generic_videos
+from ui.keyboards import main_menu, gallery_keyboard, settings_keyboard, provider_picker_keyboard
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,7 +41,7 @@ router = Router()
 download_slots = asyncio.Semaphore(settings.download_concurrency)
 upload_slots = asyncio.Semaphore(settings.upload_concurrency)
 active_downloads: dict[str, dict] = {}
-ACTIVE_PROVIDER = "eporner"
+ACTIVE_PROVIDER = DEFAULT_PROVIDER
 beeg = BeegClient()
 uploader: WZClient | None = None
 
@@ -290,7 +291,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
                 publish_date = getattr(video, "publish_date", None)
                 config = DownloadConfigRAW(quality=settings.video_quality, path=str(task_dir))
                 download_mode = "direct MP4"
-            else:
+            elif provider == "beeg":
                 video = await beeg.get_video(video_url)
                 title = getattr(video, "title", None) or title_hint
                 author = getattr(video, "author", None)
@@ -299,6 +300,17 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
                 publish_date = getattr(video, "publish_date", None)
                 config = DownloadConfigHLS(quality=settings.video_quality, path=str(task_dir), no_title=False, return_report=True)
                 download_mode = "HLS"
+            else:
+                video = await get_generic_video(provider, video_url)
+                title = getattr(video, "title", None) or title_hint
+                author = getattr(video, "author_name", None) or getattr(video, "author", None) or getattr(video, "uploader", None)
+                duration = getattr(video, "length_seconds", None) or getattr(video, "duration", 0) or 0
+                tags = getattr(video, "tags", None) or []
+                publish_date = getattr(video, "publish_date", None) or getattr(video, "upload_date", None)
+                config = make_download_config(provider, settings.video_quality, str(task_dir))
+                if config is None:
+                    raise RuntimeError(f"{get_spec(provider).name} API has no supported download config.")
+                download_mode = get_spec(provider).mode.upper()
 
             metadata_lines = []
             if author:
@@ -341,7 +353,9 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
                         f"<i>Live {download_mode} transfer — final size is confirmed when complete.</i>",
                     )
                     last_size = current_size
-            await download_task
+            download_result = await download_task
+            if download_result is False or getattr(download_result, "status", None) == "failed":
+                raise RuntimeError(f"{get_spec(provider).name} API reported that the download failed.")
 
         try:
             output = await find_valid_video(task_dir)
@@ -361,7 +375,9 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
                     shutil.rmtree(child, ignore_errors=True)
                 else:
                     child.unlink(missing_ok=True)
-            await video.download(configuration=config, mode=EpornerEncoding.mp4_h264)
+            retry_result = await video.download(configuration=config, mode=EpornerEncoding.mp4_h264)
+            if retry_result is False or getattr(retry_result, "status", None) == "failed":
+                raise RuntimeError("ePorner API reported that the retry download failed.") from first_error
             output = await find_valid_video(task_dir)
 
         actual_title = getattr(video, "title", None) or title
@@ -437,16 +453,36 @@ async def search_button(call: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "menu:provider")
 async def provider_button(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    await call.message.edit_text(
+        f"🔁 <b>Choose video source</b>\nActive: <b>{get_spec(ACTIVE_PROVIDER).name}</b>\n\nSelect a provider. Pornhub is excluded.",
+        reply_markup=provider_picker_keyboard(ACTIVE_PROVIDER, 0),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("provider:page:"))
+async def provider_page(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    page = max(0, int(call.data.rsplit(":", 1)[1]))
+    await call.message.edit_reply_markup(reply_markup=provider_picker_keyboard(ACTIVE_PROVIDER, page))
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("provider:set:"))
+async def provider_set(call: CallbackQuery):
     global ACTIVE_PROVIDER
     if not is_admin(call.from_user.id):
         return await call.answer("Not authorized", show_alert=True)
-    ACTIVE_PROVIDER = "beeg" if ACTIVE_PROVIDER == "eporner" else "eporner"
-    source_name = "Beeg" if ACTIVE_PROVIDER == "beeg" else "ePorner"
+    key = call.data.split(":", 2)[2]
+    if key not in PROVIDERS:
+        return await call.answer("Unknown provider", show_alert=True)
+    ACTIVE_PROVIDER = key
+    source_name = get_spec(key).name
     await call.message.edit_text(
-        "╭━━━ <b>BEGG</b> ━━━╮\n"
-        f"│  <i>Active source: {source_name}</i>\n"
-        "╰━━━━━━━━━━━━━━╯\n\n"
-        "New searches and direct links will use this source. Existing gallery items keep their original source.",
+        f"╭━━━ <b>BEGG</b> ━━━╮\n│  <i>Active source: {source_name}</i>\n╰━━━━━━━━━━━━━━╯\n\nNew searches use this provider. Direct links are detected automatically.",
         reply_markup=main_menu(ACTIVE_PROVIDER),
     )
     await call.answer(f"Source changed to {source_name}")

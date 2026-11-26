@@ -16,7 +16,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import CallbackQuery, Message, BufferedInputFile
+from aiogram.types import CallbackQuery, Message, BufferedInputFile, InputMediaPhoto
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from beeg_api import Client as BeegClient
@@ -24,7 +24,7 @@ from base_api import DownloadConfigHLS
 from wzgram import Client as WZClient
 from config import settings
 from services.beeg import search_videos, format_duration, clean_video_url
-from ui.keyboards import main_menu, search_result_keyboard, video_actions, settings_keyboard
+from ui.keyboards import main_menu, gallery_keyboard, settings_keyboard
 
 logging.basicConfig(
     level=logging.INFO,
@@ -419,6 +419,74 @@ async def settings_button(call: CallbackQuery):
     await call.answer()
 
 
+async def render_gallery(message: Message, item: dict, index: int, total: int) -> Message:
+    caption = (
+        f"🎬 <b>{html.escape(item['title'][:180])}</b>\\n"
+        f"🆔 <code>{html.escape(item['video_id'])}</code>\\n"
+        f"📍 <b>Result {index + 1} of {total}</b>"
+    )
+    markup = gallery_keyboard(index, total, item["url"])
+    has_photo = bool(message.photo)
+    has_thumb = bool(item.get("thumbnail"))
+
+    if has_photo and has_thumb:
+        await message.edit_media(
+            InputMediaPhoto(media=item["thumbnail"], caption=caption),
+            reply_markup=markup,
+        )
+        return message
+    if not has_photo and not has_thumb:
+        await message.edit_text(caption, reply_markup=markup)
+        return message
+
+    # Telegram cannot change a text message into a photo (or vice versa) in place.
+    chat_id = message.chat.id
+    await message.delete()
+    if has_thumb:
+        return await message.bot.send_photo(
+            chat_id=chat_id, photo=item["thumbnail"], caption=caption, reply_markup=markup
+        )
+    return await message.bot.send_message(chat_id=chat_id, text=caption, reply_markup=markup)
+
+
+@router.callback_query(F.data.in_({"gallery:prev", "gallery:next"}))
+async def gallery_navigate(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    data = await state.get_data()
+    results = data.get("search_results", [])
+    if not results:
+        return await call.answer("Search results expired. Please search again.", show_alert=True)
+    index = int(data.get("search_index", 0))
+    next_index = index - 1 if call.data == "gallery:prev" else index + 1
+    if next_index < 0 or next_index >= len(results):
+        return await call.answer("No more results in that direction.")
+    await state.update_data(search_index=next_index)
+    await render_gallery(call.message, results[next_index], next_index, len(results))
+    await call.answer()
+
+
+@router.callback_query(F.data == "gallery:page")
+async def gallery_page_info(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    await call.answer("Use Previous and Next to browse results.")
+
+
+@router.callback_query(F.data == "gallery:download")
+async def gallery_download(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    data = await state.get_data()
+    results = data.get("search_results", [])
+    if not results:
+        return await call.answer("Search results expired. Please search again.", show_alert=True)
+    index = int(data.get("search_index", 0))
+    item = results[index]
+    await call.answer("Added to download pipeline")
+    await run_download(item["url"], item["title"], call.message)
+
+
 @router.message(SearchFlow.waiting_query)
 async def process_search(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id if message.from_user else None):
@@ -447,21 +515,32 @@ async def process_search(message: Message, state: FSMContext):
         )
         return
 
-    await wait.delete()
-    for index, item in enumerate(results, 1):
-        caption = (
-            f"🎬 <b>{html.escape(item.title[:180])}</b>\n"
-            f"🆔 <code>{item.video_id}</code>\n"
-            f"🔗 <a href=\"{item.url}\">Open on Beeg</a>"
-        )
-        markup = search_result_keyboard(item.url, index)
-        if item.thumbnail:
-            try:
-                await message.answer_photo(item.thumbnail, caption=caption, reply_markup=markup)
-                continue
-            except Exception:
-                log.debug("Thumbnail unavailable for %s", item.video_id)
-        await message.answer(caption, reply_markup=markup)
+    serializable = [
+        {
+            "title": item.title,
+            "url": item.url,
+            "video_id": item.video_id,
+            "thumbnail": item.thumbnail,
+        }
+        for item in results
+    ]
+    await state.update_data(search_results=serializable, search_index=0)
+    first = serializable[0]
+    caption = (
+        f"🎬 <b>{html.escape(first['title'][:180])}</b>\\n"
+        f"🆔 <code>{html.escape(first['video_id'])}</code>\\n"
+        f"📍 <b>Result 1 of {len(serializable)}</b>"
+    )
+    markup = gallery_keyboard(0, len(serializable), first["url"])
+    if first.get("thumbnail"):
+        try:
+            await wait.delete()
+            await message.answer_photo(first["thumbnail"], caption=caption, reply_markup=markup)
+        except Exception:
+            log.exception("Could not display search thumbnail")
+            await message.answer(caption + "\\n<i>Thumbnail unavailable</i>", reply_markup=markup)
+    else:
+        await wait.edit_text(caption + "\\n<i>Thumbnail unavailable</i>", reply_markup=markup)
 
 
 @router.callback_query(F.data.startswith("get:"))

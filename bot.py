@@ -149,7 +149,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
             await send_progress(
                 status,
                 "⬇️ <b>Downloading</b>\n"
-                f"<blockquote>{title_hint[:180]}</blockquote>\n"
+                f"<blockquote>{html.escape(title_hint[:180])}</blockquote>\n"
                 "▰▱▱▱▱▱▱▱▱▱▱▱  Preparing stream…",
             )
             video = await beeg.get_video(video_url)
@@ -166,7 +166,8 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
             if publish_date:
                 metadata_lines.append(f"📅 {html.escape(str(publish_date)[:60])}")
             if tags:
-                tag_text = ", ".join(str(tag) for tag in list(tags)[:6])
+                tag_items = [tags] if isinstance(tags, str) else list(tags)
+                tag_text = ", ".join(str(tag) for tag in tag_items[:6])
                 metadata_lines.append(f"🏷 {html.escape(tag_text[:180])}")
             config = DownloadConfigHLS(
                 quality=settings.video_quality,
@@ -195,7 +196,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
                     await send_progress(
                         status,
                         "⬇️ <b>Downloading</b>\n"
-                        f"<blockquote>{title[:180]}</blockquote>\n"
+                        f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
                         f"📦 {pretty_size(current_size)} downloaded\n"
                         f"⚡ {pretty_size(speed)}/s  ·  ⏳ ETA calculating\n"
                         "<i>Live HLS transfer — final size is confirmed when complete.</i>",

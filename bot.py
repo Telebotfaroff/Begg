@@ -385,6 +385,21 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
                 last_sample_time = now
                 last_sample_size = current_size
 
+            # A very fast download may already be complete before the first poll.
+            if last_rendered_size < 0:
+                current_size = sum(
+                    p.stat().st_size for p in task_dir.rglob("*") if p.is_file()
+                )
+                elapsed = max(time.monotonic() - download_started, 0.001)
+                speed_label = f"{pretty_size(current_size / elapsed)}/s" if current_size else "No file data observed"
+                await send_progress(
+                    status,
+                    "⬇️ <b>Download finished</b>\\n"
+                    f"<blockquote>{html.escape(title[:180])}</blockquote>\\n"
+                    f"📦 {pretty_size(current_size)} downloaded\\n"
+                    f"⚡ Average speed: {speed_label}",
+                )
+
             download_result = await download_task
             if download_result is False or getattr(download_result, "status", None) == "failed":
                 raise RuntimeError(f"{get_spec(provider).name} API reported that the download failed.")

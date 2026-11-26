@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-@dataclass(frozen=True)
+@dataclass
 class Settings:
     bot_token: str = os.getenv("BOT_TOKEN", "")
     api_id: int = int(os.getenv("API_ID", "0") or 0)

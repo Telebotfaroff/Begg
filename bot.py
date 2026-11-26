@@ -281,7 +281,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
                 status,
                 "⬇️ <b>Downloading</b>\n"
                 f"<blockquote>{html.escape(title_hint[:180])}</blockquote>\n"
-                f"▰▱▱▱▱▱▱▱▱▱▱▱  Preparing {'direct MP4' if provider == 'eporner' else 'HLS'} stream…",
+                f"▰▱▱▱▱▱▱▱▱▱▱▱  Preparing {('direct MP4' if provider == 'eporner' else get_spec(provider).mode.upper())} stream…",
             )
             if provider == "eporner":
                 video = await get_eporner_video(video_url)
@@ -320,7 +320,11 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
             if author:
                 metadata_lines.append(f"👤 {html.escape(str(author)[:100])}")
             if duration:
-                metadata_lines.append(f"⏱ {format_duration(duration)}")
+                try:
+                    duration_text = format_duration(int(duration))
+                except (TypeError, ValueError):
+                    duration_text = str(duration)
+                metadata_lines.append(f"⏱ {html.escape(duration_text[:24])}")
             if publish_date:
                 metadata_lines.append(f"📅 {html.escape(str(publish_date)[:60])}")
             if tags:
@@ -428,7 +432,7 @@ async def start(message: Message, state: FSMContext):
         "│  <i>Your personal video assistant</i>\n"
         "╰━━━━━━━━━━━━━━╯\n\n"
         "Welcome back! Choose an action below.\n\n"
-        "🔎 <b>Search</b> ePorner videos by keyword or link\n"
+        "🔎 <b>Search</b> videos from the selected source or paste a video link\n"
         f"🔁 <b>Source</b> choose from {len(PROVIDERS)} video APIs\n"
         "📊 <b>Tasks</b> view current activity",
         reply_markup=main_menu(ACTIVE_PROVIDER),

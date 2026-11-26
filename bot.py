@@ -350,8 +350,8 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
                 raise
             await send_progress(
                 status,
-                "⚠️ <b>Downloaded file failed validation</b>\\n"
-                f"<blockquote>{html.escape(title[:180])}</blockquote>\\n"
+                "⚠️ <b>Downloaded file failed validation</b>\n"
+                f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
                 "🔁 Removing the incomplete file and retrying the download once…",
             )
             # The API can occasionally leave a truncated MP4 behind. Clear every

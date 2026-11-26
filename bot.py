@@ -37,6 +37,8 @@ router = Router()
 download_slots = asyncio.Semaphore(settings.download_concurrency)
 upload_slots = asyncio.Semaphore(settings.upload_concurrency)
 active_downloads: dict[str, dict] = {}
+task_handles: dict[str, asyncio.Task] = {}
+PROCESS_STARTED = time.monotonic()
 ACTIVE_PROVIDER = DEFAULT_PROVIDER
 uploader: WZClient | None = None
 
@@ -267,7 +269,10 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
         f"<blockquote>{html.escape(title_hint[:180])}</blockquote>\n"
         "Waiting for a download slot…"
     )
-    active_downloads[key] = {"title": title_hint, "status": "queued", "message": status, "provider": provider}
+    active_downloads[key] = {"title": title_hint, "status": "queued", "message": status, "provider": provider, "created_at": time.time()}
+    current_task = asyncio.current_task()
+    if current_task is not None:
+        task_handles[key] = current_task
 
     try:
         async with download_slots:
@@ -447,6 +452,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
         await send_progress(status, f"❌ <b>Task failed</b>\n<code>{html.escape(str(exc)[:700])}</code>")
     finally:
         active_downloads.pop(key, None)
+        task_handles.pop(key, None)
         shutil.rmtree(task_dir, ignore_errors=True)
 
 
@@ -540,19 +546,110 @@ async def home_button(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@router.callback_query(F.data == "menu:tasks")
+def task_monitor_keyboard() -> InlineKeyboardBuilder:
+    kb = InlineKeyboardBuilder()
+    for key, item in list(active_downloads.items())[:8]:
+        short_id = key.rsplit(":", 1)[-1]
+        label = {"queued": "🕓", "downloading": "⬇️", "waiting_upload": "📦", "uploading": "📤"}.get(item.get("status"), "•")
+        kb.button(text=f"⏹ Stop {label} #{short_id[-5:]}", callback_data=f"task:cancel:{short_id}")
+    if active_downloads:
+        kb.button(text="⏹ Cancel all tasks", callback_data="tasks:cancel_all")
+    kb.button(text="🔄 Refresh", callback_data="tasks:refresh")
+    kb.button(text="🏠 Main menu", callback_data="menu:home")
+    kb.adjust(1)
+    return kb
+
+
+def build_task_monitor_text() -> str:
+    if not active_downloads:
+        return "📊 <b>Task monitor</b>\n\n✨ No active tasks right now."
+    icons = {"queued": "🕓", "downloading": "⬇️", "waiting_upload": "📦", "uploading": "📤"}
+    rows = ["📊 <b>Task monitor</b>", ""]
+    for key, item in active_downloads.items():
+        short_id = key.rsplit(":", 1)[-1]
+        rows.append(
+            f"{icons.get(item.get('status'), '•')} <b>{html.escape(item.get('title', 'Untitled')[:65])}</b>\n"
+            f"   <code>#{short_id[-7:]}</code> · {item.get('status', 'unknown').replace('_', ' ')}"
+        )
+    rows.append("")
+    rows.append(f"Active: <b>{len(active_downloads)}</b> · Download slots: <b>{settings.download_concurrency}</b> · Upload slots: <b>{settings.upload_concurrency}</b>")
+    return "\n".join(rows)
+
+
+@router.callback_query(F.data.in_({"menu:tasks", "tasks:refresh"}))
 async def tasks_button(call: CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Not authorized", show_alert=True)
-    if not active_downloads:
-        text = "📊 <b>Task monitor</b>\n\n✨ No active tasks right now."
-    else:
-        rows = []
-        for item in active_downloads.values():
-            icon = {"queued": "🕓", "downloading": "⬇️", "waiting_upload": "📦", "uploading": "📤"}.get(item["status"], "•")
-            rows.append(f"{icon} <b>{item['title'][:70]}</b> — {item['status'].replace('_', ' ')}")
-        text = "📊 <b>Task monitor</b>\n\n" + "\n".join(rows)
-    await call.message.edit_text(text, reply_markup=main_menu(ACTIVE_PROVIDER))
+    await call.message.edit_text(build_task_monitor_text(), reply_markup=task_monitor_keyboard().as_markup())
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("task:cancel:"))
+async def cancel_one_task(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    short_id = call.data.rsplit(":", 1)[-1]
+    key = f"{call.message.chat.id}:{short_id}"
+    task = task_handles.get(key)
+    if not task or task.done():
+        return await call.answer("Task is no longer active.", show_alert=True)
+    task.cancel()
+    await call.answer("Cancellation requested.")
+    await call.message.edit_text(build_task_monitor_text(), reply_markup=task_monitor_keyboard().as_markup())
+
+
+@router.callback_query(F.data == "tasks:cancel_all")
+async def cancel_all_tasks(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    tasks = [task for task in task_handles.values() if not task.done()]
+    for task in tasks:
+        task.cancel()
+    await call.answer(f"Cancellation requested for {len(tasks)} task(s).")
+    await call.message.edit_text(build_task_monitor_text(), reply_markup=task_monitor_keyboard().as_markup())
+
+
+@router.callback_query(F.data == "menu:system")
+async def system_monitor_button(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    disk = shutil.disk_usage(Path(settings.download_dir).resolve().parent)
+    memory_text = "Unavailable"
+    try:
+        values = {}
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            name, raw = line.split(":", 1)
+            values[name] = int(raw.strip().split()[0]) * 1024
+        total = values.get("MemTotal", 0)
+        available = values.get("MemAvailable", 0)
+        if total:
+            memory_text = f"{pretty_size(total - available)} / {pretty_size(total)} used"
+    except (OSError, ValueError, IndexError):
+        pass
+    uptime = int(time.monotonic() - PROCESS_STARTED)
+    hours, remainder = divmod(uptime, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    load = "Unavailable"
+    try:
+        load = " · ".join(f"{value:.2f}" for value in os.getloadavg())
+    except (AttributeError, OSError):
+        pass
+    text = (
+        "🖥️ <b>BEGG system monitor</b>\n\n"
+        f"⏱ Runtime: <b>{hours:02d}:{minutes:02d}:{seconds:02d}</b>\n"
+        f"🧠 Memory: <b>{memory_text}</b>\n"
+        f"💾 Disk free: <b>{pretty_size(disk.free)}</b> / {pretty_size(disk.total)}\n"
+        f"⚙️ CPU cores: <b>{os.cpu_count() or 'Unknown'}</b>\n"
+        f"📈 Load average: <b>{load}</b>\n"
+        f"📊 Active tasks: <b>{len(active_downloads)}</b>\n"
+        f"🔌 Providers configured: <b>{len(PROVIDERS)}</b>"
+    )
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Refresh", callback_data="menu:system")
+    kb.button(text="📊 Tasks", callback_data="menu:tasks")
+    kb.button(text="🏠 Main menu", callback_data="menu:home")
+    kb.adjust(2, 1)
+    await call.message.edit_text(text, reply_markup=kb.as_markup())
     await call.answer()
 
 

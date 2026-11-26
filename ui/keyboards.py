@@ -13,7 +13,8 @@ def main_menu() -> InlineKeyboardMarkup:
 
 def search_result_keyboard(url: str, index: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"⬇️  Download #{index}", callback_data=f"get:{url}")
+    video_id = url.rstrip("/").split("/")[-1].lstrip("-0")
+    kb.button(text=f"⬇️  Download #{index}", callback_data=f"get:{video_id}")
     kb.button(text="↗️  Open on Beeg", url=url)
     kb.adjust(1, 1)
     return kb.as_markup()

@@ -421,8 +421,8 @@ async def settings_button(call: CallbackQuery):
 
 async def render_gallery(message: Message, item: dict, index: int, total: int) -> Message:
     caption = (
-        f"🎬 <b>{html.escape(item['title'][:180])}</b>\\n"
-        f"🆔 <code>{html.escape(item['video_id'])}</code>\\n"
+        f"🎬 <b>{html.escape(item['title'][:180])}</b>\n"
+        f"🆔 <code>{html.escape(item['video_id'])}</code>\n"
         f"📍 <b>Result {index + 1} of {total}</b>"
     )
     markup = gallery_keyboard(index, total, item["url"])
@@ -527,8 +527,8 @@ async def process_search(message: Message, state: FSMContext):
     await state.update_data(search_results=serializable, search_index=0)
     first = serializable[0]
     caption = (
-        f"🎬 <b>{html.escape(first['title'][:180])}</b>\\n"
-        f"🆔 <code>{html.escape(first['video_id'])}</code>\\n"
+        f"🎬 <b>{html.escape(first['title'][:180])}</b>\n"
+        f"🆔 <code>{html.escape(first['video_id'])}</code>\n"
         f"📍 <b>Result 1 of {len(serializable)}</b>"
     )
     markup = gallery_keyboard(0, len(serializable), first["url"])
@@ -538,9 +538,9 @@ async def process_search(message: Message, state: FSMContext):
             await message.answer_photo(first["thumbnail"], caption=caption, reply_markup=markup)
         except Exception:
             log.exception("Could not display search thumbnail")
-            await message.answer(caption + "\\n<i>Thumbnail unavailable</i>", reply_markup=markup)
+            await message.answer(caption + "\n<i>Thumbnail unavailable</i>", reply_markup=markup)
     else:
-        await wait.edit_text(caption + "\\n<i>Thumbnail unavailable</i>", reply_markup=markup)
+        await wait.edit_text(caption + "\n<i>Thumbnail unavailable</i>", reply_markup=markup)
 
 
 @router.callback_query(F.data.startswith("get:"))

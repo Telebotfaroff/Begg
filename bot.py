@@ -163,9 +163,16 @@ async def prepare_streamable_video(source: Path) -> tuple[Path, Path, dict]:
     )
     if code != 0 or not thumb.exists():
         log.warning("Thumbnail generation failed: %s", stderr[-400:])
-        thumb_path = None
-    else:
-        thumb_path = thumb
+        raise RuntimeError("Could not generate the Telegram video thumbnail.")
+    if thumb.stat().st_size > 200 * 1024:
+        code, _, stderr = await run_media_command(
+            "ffmpeg", "-y", "-ss", str(seek), "-i", str(target),
+            "-frames:v", "1", "-vf", "scale='min(240,iw)':'min(240,ih)':force_original_aspect_ratio=decrease",
+            "-q:v", "8", str(thumb),
+        )
+        if code != 0 or not thumb.exists() or thumb.stat().st_size > 200 * 1024:
+            raise RuntimeError("Generated Telegram thumbnail exceeds the 200 KB limit.")
+    thumb_path = thumb
     final_info = await probe_video(target)
     final_video = next(item for item in final_info.get("streams", []) if item.get("codec_type") == "video")
     final_audio = next((item for item in final_info.get("streams", []) if item.get("codec_type") == "audio"), None)

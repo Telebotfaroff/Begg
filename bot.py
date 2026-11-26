@@ -326,7 +326,14 @@ async def process_search(message: Message, state: FSMContext):
             f"🆔 <code>{item.video_id}</code>\n"
             f"🔗 <a href=\"{item.url}\">Open on Beeg</a>"
         )
-        await message.answer(caption, reply_markup=search_result_keyboard(item.url, index))
+        markup = search_result_keyboard(item.url, index)
+        if item.thumbnail:
+            try:
+                await message.answer_photo(item.thumbnail, caption=caption, reply_markup=markup)
+                continue
+            except Exception:
+                log.debug("Thumbnail unavailable for %s", item.video_id)
+        await message.answer(caption, reply_markup=markup)
 
 
 @router.callback_query(F.data.startswith("get:"))

@@ -1,26 +1,28 @@
-# BEGG — Personal Beeg Telegram Bot
+# BEGG — Personal ePorner-first Telegram Bot
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Telebotfaroff/Begg/blob/main/BEGG_Colab.ipynb)
 
-A private, admin-only Telegram bot with a polished inline interface, Beeg metadata/download integration, and WZGram MTProto uploads.
+A private, admin-only Telegram bot with ePorner as its primary provider, Beeg as a selectable secondary provider, a polished inline gallery, and WZGram MTProto uploads.
 
 ## Features
 
 - Admin ID allowlist; all other users are rejected.
-- Search results use Beeg's frontend WebSocket search service and are shown as a thumbnail gallery with Previous/Next navigation, result counter, Beeg link, and one-tap download.
-- Paste a Beeg category, tag, or creator page URL to parse the video cards returned in that page's HTML; gallery cards include creator, duration, views, upload age, and thumbnail when present.
+- ePorner is the default source for keyword search, category browsing, metadata and direct video downloads.
+- Switch providers from the main menu; Beeg remains available as a secondary source.
+- No silent fallback: empty or failed ePorner searches stay on ePorner until you manually switch to Beeg.
+- Thumbnail gallery with Previous/Next navigation, result counter, provider link, metadata and one-tap download.
+- Beeg keyword search, category/creator page parsing, metadata and HLS downloads.
 - Aiogram 3 Bot API for the interface.
-- Official Beeg API for video metadata (`title`, `duration`, `author`, `tags`, `publish_date`, and `thumbnail`) and HLS downloads.
 - WZGram bot-authenticated MTProto client for uploads (no personal Telegram session).
 - 5 concurrent downloads and 2 concurrent uploads.
 - Download and upload status messages with size, speed and ETA where available.
-- Telegram-ready MP4 uploads: H.264 video, AAC audio when present, MP4 faststart, real duration/dimensions, generated JPEG thumbnail, and streaming enabled.
+- Telegram-ready MP4 uploads: H.264 video, AAC audio when present, MP4 faststart, measured duration/dimensions, generated JPEG thumbnail, and streaming enabled.
 - In-memory task tracking; no database.
 - Automatic temporary-file cleanup.
 
 ## Setup
 
-Python 3.12 or newer is recommended.
+Python 3.12 or newer is required by both provider API packages.
 
 ```bash
 git clone https://github.com/Telebotfaroff/Begg.git
@@ -51,14 +53,13 @@ python bot.py
 
 Open the [BEGG Colab notebook](https://colab.research.google.com/github/Telebotfaroff/Begg/blob/main/BEGG_Colab.ipynb). Add `BOT_TOKEN`, `API_ID`, `API_HASH`, and `ADMIN_ID` under Colab Secrets, enable notebook access to secrets, and run the cells. Keep the Colab runtime active while the bot is running.
 
+## Provider implementation
 
-## Interface
+- ePorner integration is isolated in `services/eporner.py`. It uses the library's async `Client.search_videos(...)`, `Client.get_videos_by_category(...)`, `Client.get_video(...)`, and `DownloadConfigRAW` + H.264 download mode.
+- Beeg integration remains isolated in `services/beeg.py` and `services/beeg_html.py`. It uses the Beeg API's HLS downloader.
+- Provider selection is global for this single-admin personal bot. Each search result also stores its provider, so gallery navigation and downloads continue using the correct source.
+- The ePorner library's API listing returns async scrape results; each result is unwrapped before the bot maps its metadata into the common gallery format.
 
-The bot uses compact inline navigation, clear task states, separate download/upload progress cards, and a minimal premium visual style using Telegram's native message formatting.
+## Transfer pipeline
 
-## Notes
-
-- The official Beeg API provides video lookup through `Client.get_video(url)`. HLS configuration is imported from `base_api` and passed as `video.download(configuration=config)`. Keyword search is not part of the documented API, so it remains isolated in `services/beeg.py` as a separate frontend WebSocket adapter. Category-page parsing is isolated in `services/beeg_html.py` and extracts only cards present in the fetched HTML; it does not assume an undocumented infinite-scroll endpoint.
-- HLS downloads do not always expose a reliable total size before completion. During that phase the bot reports bytes downloaded and live speed; final size is shown after completion.
-- Before upload, FFmpeg/ffprobe prepares an MP4 with `+faststart`. Compatible H.264/AAC files are remuxed without re-encoding; other codecs/containers are normalized to H.264/AAC. The uploader sends the measured duration, width, height, a generated JPEG thumbnail, and `supports_streaming=True`. This preparation requires `ffmpeg` and `ffprobe` to be available in the runtime (both are normally available in Google Colab).
-- The WZGram uploader authenticates with the bot token and Telegram API credentials; no phone number, OTP, 2FA, or user session is used.
+Before upload, FFmpeg/ffprobe prepares an MP4 with `+faststart`. Compatible H.264/AAC files are remuxed without re-encoding; other codecs/containers are normalized to H.264/AAC. The uploader sends measured duration, width, height, a generated JPEG thumbnail, and `supports_streaming=True`. This requires `ffmpeg` and `ffprobe` to be available in the runtime (both are normally available in Google Colab).

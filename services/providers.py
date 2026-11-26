@@ -19,7 +19,6 @@ class ProviderSpec:
 # Package import names and RAW/HLS modes follow each project's published README.
 PROVIDERS: dict[str, ProviderSpec] = {
     "eporner": ProviderSpec("eporner", "ePorner", "eporner_api", ("eporner.com",), "raw"),
-    "beeg": ProviderSpec("beeg", "Beeg", "beeg_api", ("beeg.com",), "hls"),
     "xvideos": ProviderSpec("xvideos", "XVideos", "xvideos_api", ("xvideos.com",), "hls"),
     "xnxx": ProviderSpec("xnxx", "XNXX", "xnxx_api", ("xnxx.com",), "hls"),
     "xhamster": ProviderSpec("xhamster", "xHamster", "xhamster_api", ("xhamster.com",), "hls"),
@@ -27,21 +26,14 @@ PROVIDERS: dict[str, ProviderSpec] = {
     "xfreehd": ProviderSpec("xfreehd", "XFreeHD", "xfreehd_api", ("xfreehd.com",), "raw"),
     "hqporner": ProviderSpec("hqporner", "HQPorner", "hqporner_api", ("hqporner.com",), "raw"),
     "missav": ProviderSpec("missav", "MissAV", "missav_api", ("missav.com",), "hls"),
-    "porntrex": ProviderSpec("porntrex", "PornTrex", "porntrex_api", ("porntrex.com",), "raw"),
-    "spankbang": ProviderSpec("spankbang", "SpankBang", "spankbang_api", ("spankbang.com",), "hls"),
     "redtube": ProviderSpec("redtube", "RedTube", "redtube_api", ("redtube.com",), "hls"),
     "tube8": ProviderSpec("tube8", "Tube8", "tube8_api", ("tube8.com",), "hls"),
     "thumbzilla": ProviderSpec("thumbzilla", "Thumbzilla", "thumbzilla_api", ("thumbzilla.com",), "hls"),
     "tnaflix": ProviderSpec("tnaflix", "TNAFlix", "tnaflix_api", ("tnaflix.com",), "raw"),
     "bellesa": ProviderSpec("bellesa", "Bellesa", "bellesa_api", ("bellesa.co", "bellesa.com"), "hls"),
     "empflix": ProviderSpec("empflix", "Empflix", "empflix_api", ("empflix.com",), "raw"),
-    "porndoe": ProviderSpec("porndoe", "PornDoe", "porndoe_api", ("porndoe.com",), "hls"),
-    "porngo": ProviderSpec("porngo", "PornGo", "porngo_api", ("porngo.com",), "hls"),
     "pornhat": ProviderSpec("pornhat", "PornHat", "pornhat_api", ("pornhat.com",), "hls"),
-    "sexcom": ProviderSpec("sexcom", "Sex.com", "sex_api", ("sex.com",), "hls"),
     "youjizz": ProviderSpec("youjizz", "YouJizz", "youjizz_api", ("youjizz.com",), "hls"),
-    "redgifs": ProviderSpec("redgifs", "RedGIFs", "redgifs_api", ("redgifs.com",), "hls"),
-    "porn": ProviderSpec("porn", "Porn.com", "porn_api", ("porn.com",), "hls"),
 }
 
 DEFAULT_PROVIDER = "eporner"

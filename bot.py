@@ -333,9 +333,10 @@ async def process_search(message: Message, state: FSMContext):
 async def select_video(call: CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Not authorized", show_alert=True)
-    url = call.data.split(":", 1)[1]
+    video_id = call.data.split(":", 1)[1]
+    url = f"https://beeg.com/-0{video_id}"
     await call.answer("Added to download pipeline")
-    await run_download(url, "Selected Beeg video", call.message)
+    await run_download(url, f"Beeg video {video_id}", call.message)
 
 
 async def main():

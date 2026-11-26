@@ -73,6 +73,7 @@ async def start_wzgram() -> WZClient:
         api_id=settings.api_id,
         api_hash=settings.api_hash,
         bot_token=settings.bot_token,
+        in_memory=True,
         workdir=".",
     )
     await client.start()

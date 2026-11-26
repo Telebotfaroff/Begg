@@ -6,7 +6,7 @@ A private, admin-only Telegram bot using the video API projects published by [Ec
 
 ## Providers
 
-The source picker includes the 16 providers retained after the API smoke tests:
+The source picker includes the 16 providers not flagged as API failures in the diagnostic report:
 
 - ePorner
 - XVideos

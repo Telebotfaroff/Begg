@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
-from eporner_api import Client, Encoding
+from eporner_api import Client
+from eporner_api.modules.locals import Encoding
 
 
 @dataclass(slots=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 import shutil
@@ -111,7 +112,7 @@ async def upload_file(path: Path, title: str, progress_message: Message) -> None
         eta = remaining / max(speed, 1) if speed else 0
         text = (
             "📤 <b>Uploading to Telegram</b>\n"
-            f"<blockquote>{title[:180]}</blockquote>\n"
+            f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
             f"{progress_bar(percent)} <b>{percent:.1f}%</b>\n"
             f"📦 {pretty_size(current)} / {pretty_size(total or file_size)}\n"
             f"⚡ {pretty_size(speed)}/s  ·  ⏳ {int(eta)}s left"
@@ -122,7 +123,7 @@ async def upload_file(path: Path, title: str, progress_message: Message) -> None
     await uploader.send_video(
         chat_id=settings.admin_id,
         video=str(path),
-        caption=f"🎬 <b>{title[:900]}</b>",
+        caption=f"🎬 <b>{html.escape(title[:700])}</b>",
         supports_streaming=True,
         progress=progress,
     )
@@ -134,7 +135,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
     task_dir.mkdir(parents=True, exist_ok=True)
     status = await origin.answer(
         "⏳ <b>Preparing download</b>\n"
-        f"<blockquote>{title_hint[:180]}</blockquote>\n"
+        f"<blockquote>{html.escape(title_hint[:180])}</blockquote>\n"
         "Waiting for a download slot…"
     )
     active_downloads[key] = {"title": title_hint, "status": "queued", "message": status}
@@ -188,7 +189,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
         await send_progress(
             status,
             "✅ <b>Download complete</b>\n"
-            f"<blockquote>{actual_title[:180]}</blockquote>\n"
+            f"<blockquote>{html.escape(actual_title[:180])}</blockquote>\n"
             f"📦 {pretty_size(size)}\n"
             "⏳ Waiting for an upload slot…",
         )
@@ -209,7 +210,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
         raise
     except Exception as exc:
         log.exception("Task failed: %s", key)
-        await send_progress(status, f"❌ <b>Task failed</b>\n<code>{str(exc)[:700]}</code>")
+        await send_progress(status, f"❌ <b>Task failed</b>\n<code>{html.escape(str(exc)[:700])}</code>")
     finally:
         active_downloads.pop(key, None)
         shutil.rmtree(task_dir, ignore_errors=True)
@@ -305,12 +306,12 @@ async def process_search(message: Message, state: FSMContext):
         await run_download(query, "Beeg video", message)
         return
 
-    wait = await message.answer(f"🔎 <b>Searching Beeg…</b>\n<code>{query[:100]}</code>")
+    wait = await message.answer(f"🔎 <b>Searching Beeg…</b>\n<code>{html.escape(query[:100])}</code>")
     try:
         results = await search_videos(query, settings.search_limit)
     except Exception as exc:
         log.exception("Search failed")
-        await wait.edit_text(f"⚠️ Search failed: <code>{str(exc)[:500]}</code>", reply_markup=main_menu())
+        await wait.edit_text(f"⚠️ Search failed: <code>{html.escape(str(exc)[:500])}</code>", reply_markup=main_menu())
         return
 
     if not results:
@@ -323,7 +324,7 @@ async def process_search(message: Message, state: FSMContext):
     await wait.delete()
     for index, item in enumerate(results, 1):
         caption = (
-            f"🎬 <b>{item.title[:180]}</b>\n"
+            f"🎬 <b>{html.escape(item.title[:180])}</b>\n"
             f"🆔 <code>{item.video_id}</code>\n"
             f"🔗 <a href=\"{item.url}\">Open on Beeg</a>"
         )

@@ -118,6 +118,26 @@ async def probe_video(path: Path) -> dict:
     return json.loads(stdout)
 
 
+async def find_valid_video(task_dir: Path) -> Path:
+    """Return the largest downloaded file that FFprobe confirms is a real video."""
+    candidates = sorted(
+        (p for p in task_dir.rglob("*") if p.is_file() and p.stat().st_size > 0),
+        key=lambda p: p.stat().st_size,
+        reverse=True,
+    )
+    errors = []
+    for candidate in candidates:
+        try:
+            info = await probe_video(candidate)
+            if any(item.get("codec_type") == "video" for item in info.get("streams", [])):
+                return candidate
+            errors.append(f"{candidate.name}: no video stream")
+        except Exception as exc:
+            errors.append(f"{candidate.name}: {str(exc)[-250:]}")
+    detail = "; ".join(errors[:3]) if errors else "no non-empty output files"
+    raise RuntimeError(f"No valid video file was downloaded ({detail}).")
+
+
 async def prepare_streamable_video(source: Path) -> tuple[Path, Path, dict]:
     """Create an MP4 suitable for Telegram streaming and a JPEG video thumbnail."""
     info = await probe_video(source)
@@ -323,10 +343,27 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
                     last_size = current_size
             await download_task
 
-        candidates = [p for p in task_dir.rglob("*") if p.is_file() and p.stat().st_size > 0]
-        if not candidates:
-            raise RuntimeError("The downloader finished but no output file was created.")
-        output = max(candidates, key=lambda p: p.stat().st_size)
+        try:
+            output = await find_valid_video(task_dir)
+        except Exception as first_error:
+            if provider != "eporner":
+                raise
+            await send_progress(
+                status,
+                "⚠️ <b>Downloaded file failed validation</b>\\n"
+                f"<blockquote>{html.escape(title[:180])}</blockquote>\\n"
+                "🔁 Removing the incomplete file and retrying the download once…",
+            )
+            # The API can occasionally leave a truncated MP4 behind. Clear every
+            # artifact before retrying so the second attempt cannot reuse it.
+            for child in task_dir.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
+            await video.download(configuration=config, mode=EpornerEncoding.mp4_h264)
+            output = await find_valid_video(task_dir)
+
         actual_title = getattr(video, "title", None) or title
         size = output.stat().st_size
 

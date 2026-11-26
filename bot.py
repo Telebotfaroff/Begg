@@ -551,7 +551,12 @@ async def process_search(message: Message, state: FSMContext):
         await run_download(beeg_url, "Beeg video", message, "beeg")
         return
 
-    provider = ACTIVE_PROVIDER
+    if is_eporner_category_url(query):
+        provider = "eporner"
+    elif is_beeg_category_url(query):
+        provider = "beeg"
+    else:
+        provider = ACTIVE_PROVIDER
     provider_name = "ePorner" if provider == "eporner" else "Beeg"
     wait = await message.answer(f"🔎 <b>Searching {provider_name}…</b>\n<code>{html.escape(query[:100])}</code>")
     try:

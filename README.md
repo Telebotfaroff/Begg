@@ -12,6 +12,7 @@ A private, admin-only Telegram bot with a polished inline interface, Beeg metada
 - WZGram bot-authenticated MTProto client for uploads (no personal Telegram session).
 - 5 concurrent downloads and 2 concurrent uploads.
 - Download and upload status messages with size, speed and ETA where available.
+- Telegram-ready MP4 uploads: H.264 video, AAC audio when present, MP4 faststart, real duration/dimensions, generated JPEG thumbnail, and streaming enabled.
 - In-memory task tracking; no database.
 - Automatic temporary-file cleanup.
 
@@ -57,4 +58,5 @@ The bot uses compact inline navigation, clear task states, separate download/upl
 
 - The official Beeg API provides video lookup through `Client.get_video(url)`. HLS configuration is imported from `base_api` and passed as `video.download(configuration=config)`. Keyword search is not part of the documented API, so it remains isolated in `services/beeg.py` as a separate HTML search adapter; validate the current search-page response during the first live run.
 - HLS downloads do not always expose a reliable total size before completion. During that phase the bot reports bytes downloaded and live speed; final size is shown after completion.
+- Before upload, FFmpeg/ffprobe prepares an MP4 with `+faststart`. Compatible H.264/AAC files are remuxed without re-encoding; other codecs/containers are normalized to H.264/AAC. The uploader sends the measured duration, width, height, a generated JPEG thumbnail, and `supports_streaming=True`. This preparation requires `ffmpeg` and `ffprobe` to be available in the runtime (both are normally available in Google Colab).
 - The WZGram uploader authenticates with the bot token and Telegram API credentials; no phone number, OTP, 2FA, or user session is used.

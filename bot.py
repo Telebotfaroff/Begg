@@ -425,7 +425,7 @@ async def start(message: Message, state: FSMContext):
         "╰━━━━━━━━━━━━━━╯\n\n"
         "Welcome back! Choose an action below.\n\n"
         "🔎 <b>Search</b> ePorner videos by keyword or link\n"
-        "🔁 <b>Source</b> switch between ePorner and Beeg\n"
+        f"🔁 <b>Source</b> choose from {len(PROVIDERS)} video APIs\n"
         "📊 <b>Tasks</b> view current activity",
         reply_markup=main_menu(ACTIVE_PROVIDER),
     )
@@ -445,7 +445,7 @@ async def search_button(call: CallbackQuery, state: FSMContext):
         return await call.answer("Not authorized", show_alert=True)
     await state.set_state(SearchFlow.waiting_query)
     await call.message.edit_text(
-        f"🔎 <b>Find a video</b>\nSource: <b>{'ePorner' if ACTIVE_PROVIDER == 'eporner' else 'Beeg'}</b>\nSend a search phrase or paste a video URL.",
+        f"🔎 <b>Find a video</b>\nSource: <b>{get_spec(ACTIVE_PROVIDER).name}</b>\nSend a search phrase or paste a video URL.",
         reply_markup=InlineKeyboardBuilder().button(text="✕ Cancel", callback_data="menu:home").as_markup(),
     )
     await call.answer()
@@ -618,11 +618,15 @@ async def process_search(message: Message, state: FSMContext):
 
     eporner_url = clean_eporner_video_url(query)
     beeg_url = clean_beeg_video_url(query)
+    detected_provider = provider_for_url(query)
     if eporner_url:
         await run_download(eporner_url, "ePorner video", message, "eporner")
         return
     if beeg_url:
         await run_download(beeg_url, "Beeg video", message, "beeg")
+        return
+    if detected_provider and detected_provider not in {"eporner", "beeg"}:
+        await run_download(query, f"{get_spec(detected_provider).name} video", message, detected_provider)
         return
 
     if is_eporner_category_url(query):
@@ -631,13 +635,17 @@ async def process_search(message: Message, state: FSMContext):
         provider = "beeg"
     else:
         provider = ACTIVE_PROVIDER
-    provider_name = "ePorner" if provider == "eporner" else "Beeg"
+    provider_name = get_spec(provider).name
     wait = await message.answer(f"🔎 <b>Searching {provider_name}…</b>\n<code>{html.escape(query[:100])}</code>")
     try:
         if provider == "eporner":
             items = await fetch_eporner_category_videos(query, settings.search_limit) if is_eporner_category_url(query) else await search_eporner_videos(query, settings.search_limit)
-        else:
+        elif provider == "beeg":
             items = await fetch_beeg_category_videos(query, limit=settings.search_limit) if is_beeg_category_url(query) else await search_beeg_videos(query, settings.search_limit)
+        else:
+            if "://" in query and provider_for_url(query) == provider:
+                raise ValueError("Paste a video URL to download it; send keywords here to search.")
+            items = await search_generic_videos(provider, query, settings.search_limit)
 
         serializable = [
             {

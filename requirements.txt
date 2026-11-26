@@ -6,7 +6,6 @@ unofficial-api-for-xhamster
 unofficial-api-for-youporn
 unofficial-api-for-xfreehd
 unofficial-api-for-hqporner
-unofficial-api-for-missav
 unofficial-api-for-redtube
 unofficial-api-for-tube8
 unofficial-api-for-thumbzilla

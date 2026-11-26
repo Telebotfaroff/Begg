@@ -48,24 +48,13 @@ python bot.py
 
 Open the [BEGG Colab notebook](https://colab.research.google.com/github/Telebotfaroff/Begg/blob/main/BEGG_Colab.ipynb). Add `BOT_TOKEN`, `API_ID`, `API_HASH`, and `ADMIN_ID` under Colab Secrets, enable notebook access to secrets, and run the cells. Keep the Colab runtime active while the bot is running.
 
-```python
-!git clone https://github.com/Telebotfaroff/Begg.git
-%cd Begg
-!pip install -r requirements.txt
-import os
-os.environ["BOT_TOKEN"] = "YOUR_BOT_TOKEN"
-os.environ["API_ID"] = "YOUR_API_ID"
-os.environ["API_HASH"] = "YOUR_API_HASH"
-os.environ["ADMIN_ID"] = "YOUR_TELEGRAM_USER_ID"
-!python bot.py
-```
 
 ## Interface
 
-The bot uses compact inline navigation, clear task states, separate download/upload progress cards, and a minimal dark-themed visual language through Telegram's native message formatting.
+The bot uses compact inline navigation, clear task states, separate download/upload progress cards, and a minimal premium visual style using Telegram's native message formatting.
 
 ## Notes
 
-- The Beeg metadata library provides video lookup by URL. Keyword search is isolated in `services/beeg.py` as an HTML search adapter because keyword search is not part of the library's documented `Client` API.
+- The Beeg metadata library provides video lookup by URL. Keyword search is isolated in `services/beeg.py` as an HTML search adapter because keyword search is not part of the library's documented `Client` API; the first live run should validate the site's current search-page response.
 - HLS downloads do not always expose a reliable total size before completion. During that phase the bot reports bytes downloaded and live speed; final size is shown after completion.
 - The WZGram uploader authenticates with the bot token and Telegram API credentials; no phone number, OTP, 2FA, or user session is used.

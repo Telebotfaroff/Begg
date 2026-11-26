@@ -75,6 +75,7 @@ async def start_wzgram() -> WZClient:
         api_hash=settings.api_hash,
         bot_token=settings.bot_token,
         in_memory=True,
+        no_updates=True,
         workdir=".",
     )
     await client.start()
@@ -89,7 +90,7 @@ async def send_progress(message: Message, text: str) -> None:
         pass
 
 
-async def upload_file(path: Path, title: str, progress_message: Message) -> None:
+async def upload_file(path: Path, title: str, progress_message: Message, duration: int = 0) -> None:
     if uploader is None:
         raise RuntimeError("WZGram uploader is not initialized")
 
@@ -125,6 +126,7 @@ async def upload_file(path: Path, title: str, progress_message: Message) -> None
         video=str(path),
         caption=f"🎬 <b>{html.escape(title[:700])}</b>",
         supports_streaming=True,
+        duration=duration,
         progress=progress,
     )
 
@@ -196,7 +198,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
 
         async with upload_slots:
             active_downloads[key]["status"] = "uploading"
-            await upload_file(output, actual_title, status)
+            await upload_file(output, actual_title, status, duration=getattr(video, "duration", 0) or 0)
 
         await send_progress(
             status,

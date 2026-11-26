@@ -1,0 +1,62 @@
+name: Fetch Beeg HTML
+
+on:
+  workflow_dispatch:
+    inputs:
+      page_url:
+        description: "Beeg page URL to inspect (for example https://beeg.com/Teen)"
+        required: true
+        default: "https://beeg.com/Teen"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-html:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch page HTML and response headers
+        shell: bash
+        env:
+          PAGE_URL: ${{ inputs.page_url }}
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          value = os.environ["PAGE_URL"].strip()
+          parsed = urlparse(value)
+          if parsed.scheme != "https" or parsed.hostname not in {"beeg.com", "www.beeg.com"}:
+              raise SystemExit("Only https://beeg.com or https://www.beeg.com URLs are accepted.")
+          PY
+
+          mkdir -p beeg-debug
+          curl --compressed --silent --show-error \
+            --location --max-redirs 5 \
+            --connect-timeout 20 --max-time 90 \
+            --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" \
+            --header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+            --header "Accept-Language: en-US,en;q=0.9" \
+            --dump-header beeg-debug/response-headers.txt \
+            --output beeg-debug/page.html \
+            --write-out 'http_status=%{http_code}\ncontent_type=%{content_type}\nsize_download=%{size_download}\nfinal_url=%{url_effective}\n' \
+            "$PAGE_URL" > beeg-debug/fetch-info.txt
+
+          {
+            echo "Requested URL: $PAGE_URL"
+            cat beeg-debug/fetch-info.txt
+            echo
+            echo "HTML bytes: $(wc -c < beeg-debug/page.html)"
+          } | tee beeg-debug/summary.txt
+
+      - name: Upload HTML debug artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: beeg-html-debug
+          path: beeg-debug/
+          if-no-files-found: error
+          retention-days: 7

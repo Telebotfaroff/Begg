@@ -17,28 +17,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Fetch page HTML, headers, and application bundle
+      - name: Fetch page HTML
         shell: bash
         env:
           PAGE_URL: ${{ inputs.page_url }}
         run: |
           set -euo pipefail
-
           python - <<'PY'
           import os
           from urllib.parse import urlparse
-
           value = os.environ["PAGE_URL"].strip()
           parsed = urlparse(value)
           if parsed.scheme != "https" or parsed.hostname not in {"beeg.com", "www.beeg.com"}:
-              raise SystemExit("Only https://beeg.com or https://www.beeg.com URLs are accepted.")
+              raise SystemExit("Only HTTPS Beeg URLs are accepted.")
           PY
-
           mkdir -p beeg-debug
-          curl --compressed --silent --show-error \
-            --location --max-redirs 5 \
+          curl --compressed --silent --show-error --location --max-redirs 5 \
             --connect-timeout 20 --max-time 90 \
-            --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" \
+            --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36" \
             --header "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
             --header "Accept-Language: en-US,en;q=0.9" \
             --dump-header beeg-debug/response-headers.txt \
@@ -46,46 +42,58 @@ jobs:
             --write-out 'http_status=%{http_code}\ncontent_type=%{content_type}\nsize_download=%{size_download}\nfinal_url=%{url_effective}\n' \
             "$PAGE_URL" > beeg-debug/fetch-info.txt
 
+      - name: Find and download application JavaScript
+        shell: bash
+        env:
+          PAGE_URL: ${{ inputs.page_url }}
+        run: |
+          set -euo pipefail
           python - <<'PY'
-          import re
+          import os
+          from html.parser import HTMLParser
           from pathlib import Path
           from urllib.parse import urljoin, urlparse
 
-          html = Path("beeg-debug/page.html").read_text(errors="replace")
-          scripts = re.findall(r'<script[^>]+src=["\\']([^"\\']+\.js(?:\?[^"\\']*)?)["\\']', html, re.I)
-          if not scripts:
-              raise SystemExit("No external JavaScript bundle was found in the HTML.")
+          class ScriptParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.sources = []
+              def handle_starttag(self, tag, attrs):
+                  if tag.lower() == "script":
+                      src = dict(attrs).get("src")
+                      if src:
+                          self.sources.append(src)
 
-          # Save all app bundle URLs for debugging; fetch the main bundle(s).
-          from os import environ
-          base = environ["PAGE_URL"]
-          from urllib.parse import urlparse
-          origin = f"{urlparse(base).scheme}://{urlparse(base).netloc}"
-          bundles = []
-          for src in scripts:
-              url = urljoin(origin, src)
+          page = Path("beeg-debug/page.html").read_text(errors="replace")
+          parser = ScriptParser()
+          parser.feed(page)
+
+          base = os.environ["PAGE_URL"]
+          urls = []
+          for src in parser.sources:
+              url = urljoin(base, src)
               parsed = urlparse(url)
-              if parsed.scheme == "https" and parsed.hostname in {"beeg.com", "www.beeg.com"} and "/dist/" in parsed.path:
-                  bundles.append(url)
+              if parsed.scheme == "https" and parsed.hostname in {"beeg.com", "www.beeg.com"} and parsed.path.endswith(".js"):
+                  if url not in urls:
+                      urls.append(url)
 
-          if not bundles:
-              raise SystemExit("No Beeg /dist JavaScript bundle was found.")
+          if not urls:
+              raise SystemExit("No external Beeg JavaScript bundles found in page HTML.")
 
-          Path("beeg-debug/bundle-urls.txt").write_text("\\n".join(bundles) + "\\n")
-          for index, url in enumerate(bundles, 1):
-              print(f"Fetching bundle {index}: {url}")
-              Path(f"beeg-debug/app-{index}.js.url").write_text(url + "\\n")
+          Path("beeg-debug/bundle-urls.txt").write_text("\n".join(urls) + "\n")
+          for index, url in enumerate(urls, 1):
+              print(f"Found bundle {index}: {url}")
           PY
 
+          index=0
           while IFS= read -r bundle_url; do
             [ -n "$bundle_url" ] || continue
-            bundle_file="beeg-debug/$(basename "${bundle_url%%\?*}")"
-            curl --compressed --silent --show-error \
-              --location --max-redirs 5 \
+            index=$((index + 1))
+            curl --compressed --silent --show-error --location --max-redirs 5 \
               --connect-timeout 20 --max-time 120 \
-              --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" \
-              --output "$bundle_file" "$bundle_url"
-            echo "Downloaded $bundle_file ($(wc -c < "$bundle_file") bytes)"
+              --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36" \
+              --output "beeg-debug/app-${index}.js" "$bundle_url"
+            echo "Downloaded app-${index}.js ($(wc -c < "beeg-debug/app-${index}.js") bytes)"
           done < beeg-debug/bundle-urls.txt
 
           {
@@ -97,7 +105,7 @@ jobs:
             cat beeg-debug/bundle-urls.txt
           } | tee beeg-debug/summary.txt
 
-      - name: Upload HTML and JavaScript debug artifact
+      - name: Upload debug artifact
         uses: actions/upload-artifact@v4
         with:
           name: beeg-html-debug

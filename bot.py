@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 import os
 import shutil
@@ -91,10 +92,98 @@ async def send_progress(message: Message, text: str) -> None:
         pass
 
 
-async def upload_file(path: Path, title: str, progress_message: Message, duration: int = 0) -> None:
+async def run_media_command(*args: str) -> tuple[int, str, str]:
+    process = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    return process.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+
+
+async def probe_video(path: Path) -> dict:
+    code, stdout, stderr = await run_media_command(
+        "ffprobe", "-v", "error", "-show_entries",
+        "format=duration:stream=codec_type,codec_name,width,height",
+        "-of", "json", str(path),
+    )
+    if code != 0:
+        raise RuntimeError(f"ffprobe could not read the downloaded video: {stderr[-500:]}")
+    return json.loads(stdout)
+
+
+async def prepare_streamable_video(source: Path) -> tuple[Path, Path, dict]:
+    """Create an MP4 suitable for Telegram streaming and a JPEG video thumbnail."""
+    info = await probe_video(source)
+    streams = info.get("streams", [])
+    video_stream = next((item for item in streams if item.get("codec_type") == "video"), None)
+    if not video_stream:
+        raise RuntimeError("Downloaded file has no video stream.")
+    audio_stream = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    duration = int(float(info.get("format", {}).get("duration") or 0))
+    width = int(video_stream.get("width") or 0)
+    height = int(video_stream.get("height") or 0)
+
+    target = source.with_name(f"{source.stem}_telegram.mp4")
+    thumb = source.with_name(f"{source.stem}_thumb.jpg")
+    compatible = (
+        source.suffix.lower() == ".mp4"
+        and video_stream.get("codec_name") == "h264"
+        and (audio_stream is None or audio_stream.get("codec_name") == "aac")
+    )
+    if compatible:
+        # Re-mux with faststart so MP4 index metadata is at the beginning.
+        args = ["ffmpeg", "-y", "-i", str(source), "-map", "0:v:0", "-map", "0:a?"]
+        args += ["-c", "copy", "-movflags", "+faststart", str(target)]
+        code, _, stderr = await run_media_command(*args)
+        if code != 0:
+            compatible = False
+
+    if not compatible:
+        # Normalize unsupported containers/codecs to broadly playable H.264/AAC MP4.
+        args = [
+            "ffmpeg", "-y", "-i", str(source), "-map", "0:v:0", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart", str(target),
+        ]
+        code, _, stderr = await run_media_command(*args)
+        if code != 0:
+            raise RuntimeError(f"Could not prepare a Telegram-streamable MP4: {stderr[-700:]}")
+    if not target.exists() or target.stat().st_size == 0:
+        raise RuntimeError("FFmpeg did not create the prepared MP4.")
+
+    # Telegram video thumbnails must be JPEG and no larger than 320x320.
+    seek = max(0, min(1, duration // 2))
+    code, _, stderr = await run_media_command(
+        "ffmpeg", "-y", "-ss", str(seek), "-i", str(target),
+        "-frames:v", "1", "-vf", "scale='min(320,iw)':'min(320,ih)':force_original_aspect_ratio=decrease",
+        "-q:v", "4", str(thumb),
+    )
+    if code != 0 or not thumb.exists():
+        log.warning("Thumbnail generation failed: %s", stderr[-400:])
+        thumb_path = None
+    else:
+        thumb_path = thumb
+    final_info = await probe_video(target)
+    final_video = next(item for item in final_info.get("streams", []) if item.get("codec_type") == "video")
+    final_audio = next((item for item in final_info.get("streams", []) if item.get("codec_type") == "audio"), None)
+    if final_video.get("codec_name") != "h264" or (final_audio and final_audio.get("codec_name") != "aac"):
+        raise RuntimeError("Prepared video is not H.264/AAC compatible.")
+    metadata = {
+        "duration": int(float(final_info.get("format", {}).get("duration") or duration)),
+        "width": int(final_video.get("width") or width),
+        "height": int(final_video.get("height") or height),
+    }
+    return target, thumb_path, metadata
+
+
+async def upload_file(path: Path, title: str, progress_message: Message) -> None:
     if uploader is None:
         raise RuntimeError("WZGram uploader is not initialized")
 
+    path, thumbnail, metadata = await prepare_streamable_video(path)
     started = time.monotonic()
     last_update = 0.0
     last_bytes = 0
@@ -127,7 +216,11 @@ async def upload_file(path: Path, title: str, progress_message: Message, duratio
         video=str(path),
         caption=f"🎬 <b>{html.escape(title[:700])}</b>",
         supports_streaming=True,
-        duration=duration,
+        duration=metadata["duration"],
+        width=metadata["width"],
+        height=metadata["height"],
+        thumb=str(thumbnail) if thumbnail else None,
+        file_name=path.name,
         progress=progress,
     )
 
@@ -222,7 +315,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
 
         async with upload_slots:
             active_downloads[key]["status"] = "uploading"
-            await upload_file(output, actual_title, status, duration=duration)
+            await upload_file(output, actual_title, status)
 
         await send_progress(
             status,

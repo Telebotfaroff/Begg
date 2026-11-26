@@ -15,9 +15,9 @@ permissions:
 jobs:
   fetch-html:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
-      - name: Fetch page HTML and response headers
+      - name: Fetch page HTML, headers, and application bundle
         shell: bash
         env:
           PAGE_URL: ${{ inputs.page_url }}
@@ -46,14 +46,59 @@ jobs:
             --write-out 'http_status=%{http_code}\ncontent_type=%{content_type}\nsize_download=%{size_download}\nfinal_url=%{url_effective}\n' \
             "$PAGE_URL" > beeg-debug/fetch-info.txt
 
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          from urllib.parse import urljoin, urlparse
+
+          html = Path("beeg-debug/page.html").read_text(errors="replace")
+          scripts = re.findall(r'<script[^>]+src=["\\']([^"\\']+\.js(?:\?[^"\\']*)?)["\\']', html, re.I)
+          if not scripts:
+              raise SystemExit("No external JavaScript bundle was found in the HTML.")
+
+          # Save all app bundle URLs for debugging; fetch the main bundle(s).
+          base = "${PAGE_URL}"
+          from os import environ
+          base = environ["PAGE_URL"]
+          from urllib.parse import urlparse
+          origin = f"{urlparse(base).scheme}://{urlparse(base).netloc}"
+          bundles = []
+          for src in scripts:
+              url = urljoin(origin, src)
+              parsed = urlparse(url)
+              if parsed.scheme == "https" and parsed.hostname in {"beeg.com", "www.beeg.com"} and "/dist/" in parsed.path:
+                  bundles.append(url)
+
+          if not bundles:
+              raise SystemExit("No Beeg /dist JavaScript bundle was found.")
+
+          Path("beeg-debug/bundle-urls.txt").write_text("\\n".join(bundles) + "\\n")
+          for index, url in enumerate(bundles, 1):
+              print(f"Fetching bundle {index}: {url}")
+              Path(f"beeg-debug/app-{index}.js.url").write_text(url + "\\n")
+          PY
+
+          while IFS= read -r bundle_url; do
+            [ -n "$bundle_url" ] || continue
+            bundle_file="beeg-debug/$(basename "${bundle_url%%\?*}")"
+            curl --compressed --silent --show-error \
+              --location --max-redirs 5 \
+              --connect-timeout 20 --max-time 120 \
+              --user-agent "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" \
+              --output "$bundle_file" "$bundle_url"
+            echo "Downloaded $bundle_file ($(wc -c < "$bundle_file") bytes)"
+          done < beeg-debug/bundle-urls.txt
+
           {
             echo "Requested URL: $PAGE_URL"
             cat beeg-debug/fetch-info.txt
             echo
             echo "HTML bytes: $(wc -c < beeg-debug/page.html)"
+            echo "JavaScript bundles:"
+            cat beeg-debug/bundle-urls.txt
           } | tee beeg-debug/summary.txt
 
-      - name: Upload HTML debug artifact
+      - name: Upload HTML and JavaScript debug artifact
         uses: actions/upload-artifact@v4
         with:
           name: beeg-html-debug

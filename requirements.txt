@@ -1,4 +1,5 @@
 aiogram>=3.20,<4
+unofficial-api-for-eporner>=3.0.0
 unofficial-api-for-beeg>=1.7.6
 wzgram>=3.1.7
 curl-cffi>=0.13

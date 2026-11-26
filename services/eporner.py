@@ -123,8 +123,9 @@ async def fetch_category_videos(url: str, limit: int = 10) -> list[EpornerResult
         raise ValueError("Please provide an ePorner category URL.")
     parts = [part for part in urlsplit(url).path.split("/") if part]
     category = parts[1]
+    page = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 1
     limit = max(1, min(int(limit), 50))
-    stream = client.get_videos_by_category(category=category, pages=1)
+    stream = client.get_videos_by_category(category=category, pages=1, start_page=page)
     return await _collect(stream, limit)
 
 

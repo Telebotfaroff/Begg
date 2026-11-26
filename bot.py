@@ -18,7 +18,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import CallbackQuery, Message, BufferedInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from beeg_api import Client as BeegClient, DownloadConfigHLS
+from beeg_api import Client as BeegClient
+from base_api import DownloadConfigHLS
 from wzgram import Client as WZClient
 from config import settings
 from services.beeg import search_videos, format_duration, clean_video_url
@@ -153,6 +154,20 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
             )
             video = await beeg.get_video(video_url)
             title = getattr(video, "title", None) or title_hint
+            author = getattr(video, "author", None)
+            duration = getattr(video, "duration", 0) or 0
+            tags = getattr(video, "tags", None) or []
+            publish_date = getattr(video, "publish_date", None)
+            metadata_lines = []
+            if author:
+                metadata_lines.append(f"👤 {html.escape(str(author)[:100])}")
+            if duration:
+                metadata_lines.append(f"⏱ {format_duration(duration)}")
+            if publish_date:
+                metadata_lines.append(f"📅 {html.escape(str(publish_date)[:60])}")
+            if tags:
+                tag_text = ", ".join(str(tag) for tag in list(tags)[:6])
+                metadata_lines.append(f"🏷 {html.escape(tag_text[:180])}")
             config = DownloadConfigHLS(
                 quality=settings.video_quality,
                 path=str(task_dir),
@@ -161,7 +176,15 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
             )
 
             download_started = time.monotonic()
-            download_task = asyncio.create_task(video.download(config))
+            if metadata_lines:
+                await send_progress(
+                    status,
+                    "⬇️ <b>Downloading</b>\n"
+                    f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
+                    + "\n".join(metadata_lines)
+                    + "\n\nPreparing HLS stream…",
+                )
+            download_task = asyncio.create_task(video.download(configuration=config))
             last_size = -1
             while not download_task.done():
                 await asyncio.sleep(settings.update_interval)
@@ -198,12 +221,12 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
 
         async with upload_slots:
             active_downloads[key]["status"] = "uploading"
-            await upload_file(output, actual_title, status, duration=getattr(video, "duration", 0) or 0)
+            await upload_file(output, actual_title, status, duration=duration)
 
         await send_progress(
             status,
             "✨ <b>Transfer complete</b>\n"
-            f"<blockquote>{actual_title[:180]}</blockquote>\n"
+            f"<blockquote>{html.escape(actual_title[:180])}</blockquote>\n"
             f"📦 {pretty_size(size)}\n"
             "📤 Sent to your Telegram chat.",
         )

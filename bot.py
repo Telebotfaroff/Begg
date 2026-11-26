@@ -273,6 +273,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
     current_task = asyncio.current_task()
     if current_task is not None:
         task_handles[key] = current_task
+    download_task: asyncio.Task | None = None
 
     try:
         async with download_slots:
@@ -451,6 +452,9 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
         log.exception("Task failed: %s", key)
         await send_progress(status, f"❌ <b>Task failed</b>\n<code>{html.escape(str(exc)[:700])}</code>")
     finally:
+        if download_task is not None and not download_task.done():
+            download_task.cancel()
+            await asyncio.gather(download_task, return_exceptions=True)
         active_downloads.pop(key, None)
         task_handles.pop(key, None)
         shutil.rmtree(task_dir, ignore_errors=True)

@@ -76,6 +76,10 @@ def task_id(chat_id: int, message_id: int) -> str:
     return f"{chat_id}:{message_id}"
 
 
+def item_field(item, name: str, default=None):
+    return item.get(name, default) if isinstance(item, dict) else getattr(item, name, default)
+
+
 async def start_wzgram() -> WZClient:
     client = WZClient(
         name="begg-uploader",
@@ -649,18 +653,19 @@ async def process_search(message: Message, state: FSMContext):
 
         serializable = [
             {
-                "title": item.title,
-                "url": item.url,
-                "video_id": item.video_id,
-                "thumbnail": item.thumbnail,
-                "creator": getattr(item, "creator", None),
-                "creator_url": getattr(item, "creator_url", None),
-                "duration": getattr(item, "duration", None),
-                "views": getattr(item, "views", None),
-                "uploaded": getattr(item, "uploaded", None),
+                "title": item_field(item, "title"),
+                "url": item_field(item, "url"),
+                "video_id": item_field(item, "video_id"),
+                "thumbnail": item_field(item, "thumbnail"),
+                "creator": item_field(item, "creator"),
+                "creator_url": item_field(item, "creator_url"),
+                "duration": item_field(item, "duration"),
+                "views": item_field(item, "views"),
+                "uploaded": item_field(item, "uploaded"),
                 "provider": provider,
             }
             for item in items
+            if item_field(item, "url") and item_field(item, "title")
         ]
         results = serializable
     except Exception as exc:

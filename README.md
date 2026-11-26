@@ -1,5 +1,7 @@
 # BEGG — Personal Beeg Telegram Bot
 
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Telebotfaroff/Begg/blob/main/BEGG_Colab.ipynb)
+
 A private, admin-only Telegram bot with a polished inline interface, Beeg metadata/download integration, and WZGram MTProto uploads.
 
 ## Features
@@ -44,7 +46,7 @@ python bot.py
 
 ## Google Colab
 
-Open a new Colab notebook, clone the repository, install requirements, set the four required environment variables, then run `python bot.py`. Keep the Colab runtime active while the bot is running.
+Open the [BEGG Colab notebook](https://colab.research.google.com/github/Telebotfaroff/Begg/blob/main/BEGG_Colab.ipynb). Add `BOT_TOKEN`, `API_ID`, `API_HASH`, and `ADMIN_ID` under Colab Secrets, enable notebook access to secrets, and run the cells. Keep the Colab runtime active while the bot is running.
 
 ```python
 !git clone https://github.com/Telebotfaroff/Begg.git

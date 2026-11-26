@@ -20,11 +20,13 @@ from aiogram.types import CallbackQuery, Message, BufferedInputFile, InputMediaP
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from beeg_api import Client as BeegClient
+from eporner_api import Client as EpornerClient, DownloadConfigRAW, Encoding as EpornerEncoding
 from base_api import DownloadConfigHLS
 from wzgram import Client as WZClient
 from config import settings
-from services.beeg import search_videos, format_duration, clean_video_url
-from services.beeg_html import fetch_category_videos, is_category_url
+from services.beeg import search_videos as search_beeg_videos, format_duration, clean_video_url as clean_beeg_video_url
+from services.beeg_html import fetch_category_videos as fetch_beeg_category_videos, is_category_url as is_beeg_category_url
+from services.eporner import clean_video_url as clean_eporner_video_url, fetch_category_videos as fetch_eporner_category_videos, get_video as get_eporner_video, is_category_url as is_eporner_category_url, search_videos as search_eporner_videos
 from ui.keyboards import main_menu, gallery_keyboard, settings_keyboard
 
 logging.basicConfig(
@@ -37,7 +39,9 @@ router = Router()
 download_slots = asyncio.Semaphore(settings.download_concurrency)
 upload_slots = asyncio.Semaphore(settings.upload_concurrency)
 active_downloads: dict[str, dict] = {}
+ACTIVE_PROVIDER = "eporner"
 beeg = BeegClient()
+eporner = EpornerClient()
 uploader: WZClient | None = None
 
 
@@ -233,7 +237,8 @@ async def upload_file(path: Path, title: str, progress_message: Message) -> None
     )
 
 
-async def run_download(video_url: str, title_hint: str, origin: Message) -> None:
+async def run_download(video_url: str, title_hint: str, origin: Message, provider: str | None = None) -> None:
+    provider = provider or ACTIVE_PROVIDER
     key = task_id(origin.chat.id, origin.message_id)
     task_dir = Path(settings.download_dir) / str(origin.chat.id) / str(origin.message_id)
     task_dir.mkdir(parents=True, exist_ok=True)
@@ -242,7 +247,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
         f"<blockquote>{html.escape(title_hint[:180])}</blockquote>\n"
         "Waiting for a download slot…"
     )
-    active_downloads[key] = {"title": title_hint, "status": "queued", "message": status}
+    active_downloads[key] = {"title": title_hint, "status": "queued", "message": status, "provider": provider}
 
     try:
         async with download_slots:
@@ -251,14 +256,30 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
                 status,
                 "⬇️ <b>Downloading</b>\n"
                 f"<blockquote>{html.escape(title_hint[:180])}</blockquote>\n"
-                "▰▱▱▱▱▱▱▱▱▱▱▱  Preparing stream…",
+                f"▰▱▱▱▱▱▱▱▱▱▱▱  Preparing {'direct MP4' if provider == 'eporner' else 'HLS'} stream…",
             )
-            video = await beeg.get_video(video_url)
-            title = getattr(video, "title", None) or title_hint
-            author = getattr(video, "author", None)
-            duration = getattr(video, "duration", 0) or 0
-            tags = getattr(video, "tags", None) or []
-            publish_date = getattr(video, "publish_date", None)
+            if provider == "eporner":
+                video = await get_eporner_video(video_url)
+                title = getattr(video, "title", None) or title_hint
+                author = getattr(video, "uploader", None)
+                if not author:
+                    performers = getattr(video, "performers", None) or []
+                    author = performers[0].get("name") if performers and isinstance(performers[0], dict) else None
+                duration = getattr(video, "length_seconds", 0) or 0
+                tags = getattr(video, "keywords", None) or getattr(video, "tags", None) or []
+                publish_date = getattr(video, "publish_date", None)
+                config = DownloadConfigRAW(quality=settings.video_quality, path=str(task_dir))
+                download_mode = "direct MP4"
+            else:
+                video = await beeg.get_video(video_url)
+                title = getattr(video, "title", None) or title_hint
+                author = getattr(video, "author", None)
+                duration = getattr(video, "duration", 0) or 0
+                tags = getattr(video, "tags", None) or []
+                publish_date = getattr(video, "publish_date", None)
+                config = DownloadConfigHLS(quality=settings.video_quality, path=str(task_dir), no_title=False, return_report=True)
+                download_mode = "HLS"
+
             metadata_lines = []
             if author:
                 metadata_lines.append(f"👤 {html.escape(str(author)[:100])}")
@@ -270,12 +291,6 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
                 tag_items = [tags] if isinstance(tags, str) else list(tags)
                 tag_text = ", ".join(str(tag) for tag in tag_items[:6])
                 metadata_lines.append(f"🏷 {html.escape(tag_text[:180])}")
-            config = DownloadConfigHLS(
-                quality=settings.video_quality,
-                path=str(task_dir),
-                no_title=False,
-                return_report=True,
-            )
 
             download_started = time.monotonic()
             if metadata_lines:
@@ -284,9 +299,12 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
                     "⬇️ <b>Downloading</b>\n"
                     f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
                     + "\n".join(metadata_lines)
-                    + "\n\nPreparing HLS stream…",
+                    + f"\n\nPreparing {download_mode} stream…",
                 )
-            download_task = asyncio.create_task(video.download(configuration=config))
+            if provider == "eporner":
+                download_task = asyncio.create_task(video.download(configuration=config, mode=EpornerEncoding.mp4_h264))
+            else:
+                download_task = asyncio.create_task(video.download(configuration=config))
             last_size = -1
             while not download_task.done():
                 await asyncio.sleep(settings.update_interval)
@@ -300,7 +318,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message) -> None
                         f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
                         f"📦 {pretty_size(current_size)} downloaded\n"
                         f"⚡ {pretty_size(speed)}/s  ·  ⏳ ETA calculating\n"
-                        "<i>Live HLS transfer — final size is confirmed when complete.</i>",
+                        f"<i>Live {download_mode} transfer — final size is confirmed when complete.</i>",
                     )
                     last_size = current_size
             await download_task
@@ -350,13 +368,13 @@ async def start(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         "╭━━━ <b>BEGG</b> ━━━╮\n"
-        "│  <i>Your personal Beeg media assistant</i>\n"
+        "│  <i>Your personal video assistant</i>\n"
         "╰━━━━━━━━━━━━━━╯\n\n"
         "Welcome back! Choose an action below.\n\n"
-        "🔎 <b>Search</b> videos by keyword\n"
-        "🔗 <b>Open link</b> using a Beeg URL or video ID\n"
+        "🔎 <b>Search</b> ePorner videos by keyword or link\n"
+        "🔁 <b>Source</b> switch between ePorner and Beeg\n"
         "📊 <b>Tasks</b> view current activity",
-        reply_markup=main_menu(),
+        reply_markup=main_menu(ACTIVE_PROVIDER),
     )
 
 
@@ -365,7 +383,7 @@ async def cancel(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id if message.from_user else None):
         return await deny(message)
     await state.clear()
-    await message.answer("Cancelled. You're back at the main menu.", reply_markup=main_menu())
+    await message.answer("Cancelled. You're back at the main menu.", reply_markup=main_menu(ACTIVE_PROVIDER))
 
 
 @router.callback_query(F.data == "menu:search")
@@ -374,10 +392,27 @@ async def search_button(call: CallbackQuery, state: FSMContext):
         return await call.answer("Not authorized", show_alert=True)
     await state.set_state(SearchFlow.waiting_query)
     await call.message.edit_text(
-        "🔎 <b>Find a video</b>\nSend a search phrase or paste a Beeg video URL.",
+        f"🔎 <b>Find a video</b>\nSource: <b>{'ePorner' if ACTIVE_PROVIDER == 'eporner' else 'Beeg'}</b>\nSend a search phrase or paste a video URL.",
         reply_markup=InlineKeyboardBuilder().button(text="✕ Cancel", callback_data="menu:home").as_markup(),
     )
     await call.answer()
+
+
+@router.callback_query(F.data == "menu:provider")
+async def provider_button(call: CallbackQuery):
+    global ACTIVE_PROVIDER
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    ACTIVE_PROVIDER = "beeg" if ACTIVE_PROVIDER == "eporner" else "eporner"
+    source_name = "Beeg" if ACTIVE_PROVIDER == "beeg" else "ePorner"
+    await call.message.edit_text(
+        "╭━━━ <b>BEGG</b> ━━━╮\n"
+        f"│  <i>Active source: {source_name}</i>\n"
+        "╰━━━━━━━━━━━━━━╯\n\n"
+        "New searches and direct links will use this source. Existing gallery items keep their original source.",
+        reply_markup=main_menu(ACTIVE_PROVIDER),
+    )
+    await call.answer(f"Source changed to {source_name}")
 
 
 @router.callback_query(F.data == "menu:home")
@@ -385,7 +420,7 @@ async def home_button(call: CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id):
         return await call.answer("Not authorized", show_alert=True)
     await state.clear()
-    await call.message.edit_text("╭━━━ <b>BEGG</b> ━━━╮\n│  <i>Personal media assistant</i>\n╰━━━━━━━━━━━━━━╯\nChoose an action:", reply_markup=main_menu())
+    await call.message.edit_text("╭━━━ <b>BEGG</b> ━━━╮\n│  <i>Personal media assistant</i>\n╰━━━━━━━━━━━━━━╯\nChoose an action:", reply_markup=main_menu(ACTIVE_PROVIDER))
     await call.answer()
 
 
@@ -401,7 +436,7 @@ async def tasks_button(call: CallbackQuery):
             icon = {"queued": "🕓", "downloading": "⬇️", "waiting_upload": "📦", "uploading": "📤"}.get(item["status"], "•")
             rows.append(f"{icon} <b>{item['title'][:70]}</b> — {item['status'].replace('_', ' ')}")
         text = "📊 <b>Task monitor</b>\n\n" + "\n".join(rows)
-    await call.message.edit_text(text, reply_markup=main_menu())
+    await call.message.edit_text(text, reply_markup=main_menu(ACTIVE_PROVIDER))
     await call.answer()
 
 
@@ -436,7 +471,8 @@ async def render_gallery(message: Message, item: dict, index: int, total: int) -
         + f"🆔 <code>{html.escape(item['video_id'])}</code>\n"
         + f"📍 <b>Result {index + 1} of {total}</b>"
     )
-    markup = gallery_keyboard(index, total, item["url"])
+    provider = item.get("provider", "eporner")
+    markup = gallery_keyboard(index, total, item["url"], provider)
     has_photo = bool(message.photo)
     has_thumb = bool(item.get("thumbnail"))
 
@@ -495,7 +531,7 @@ async def gallery_download(call: CallbackQuery, state: FSMContext):
     index = int(data.get("search_index", 0))
     item = results[index]
     await call.answer("Added to download pipeline")
-    await run_download(item["url"], item["title"], call.message)
+    await run_download(item["url"], item["title"], call.message, item.get("provider", "eporner"))
 
 
 @router.message(SearchFlow.waiting_query)
@@ -507,49 +543,49 @@ async def process_search(message: Message, state: FSMContext):
         return await message.answer("Please send a search phrase or Beeg URL.")
     await state.clear()
 
-    if clean_video_url(query):
-        await run_download(query, "Beeg video", message)
+    eporner_url = clean_eporner_video_url(query)
+    beeg_url = clean_beeg_video_url(query)
+    if eporner_url:
+        await run_download(eporner_url, "ePorner video", message, "eporner")
+        return
+    if beeg_url:
+        await run_download(beeg_url, "Beeg video", message, "beeg")
         return
 
-    wait = await message.answer(f"🔎 <b>Searching Beeg…</b>\n<code>{html.escape(query[:100])}</code>")
+    provider = ACTIVE_PROVIDER
+    provider_name = "ePorner" if provider == "eporner" else "Beeg"
+    wait = await message.answer(f"🔎 <b>Searching {provider_name}…</b>\\n<code>{html.escape(query[:100])}</code>")
     try:
-        if is_category_url(query):
-            category_items = await fetch_category_videos(query, limit=settings.search_limit)
-            results = category_items
-            serializable = [
-                {
-                    "title": item.title,
-                    "url": item.url,
-                    "video_id": item.video_id,
-                    "thumbnail": item.thumbnail,
-                    "creator": item.creator,
-                    "creator_url": item.creator_url,
-                    "duration": item.duration,
-                    "views": item.views,
-                    "uploaded": item.uploaded,
-                }
-                for item in category_items
-            ]
+        if provider == "eporner":
+            items = await fetch_eporner_category_videos(query, settings.search_limit) if is_eporner_category_url(query) else await search_eporner_videos(query, settings.search_limit)
         else:
-            results = await search_videos(query, settings.search_limit)
-            serializable = [
-                {
-                    "title": item.title,
-                    "url": item.url,
-                    "video_id": item.video_id,
-                    "thumbnail": item.thumbnail,
-                }
-                for item in results
-            ]
+            items = await fetch_beeg_category_videos(query, limit=settings.search_limit) if is_beeg_category_url(query) else await search_beeg_videos(query, settings.search_limit)
+
+        serializable = [
+            {
+                "title": item.title,
+                "url": item.url,
+                "video_id": item.video_id,
+                "thumbnail": item.thumbnail,
+                "creator": getattr(item, "creator", None),
+                "creator_url": getattr(item, "creator_url", None),
+                "duration": getattr(item, "duration", None),
+                "views": getattr(item, "views", None),
+                "uploaded": getattr(item, "uploaded", None),
+                "provider": provider,
+            }
+            for item in items
+        ]
+        results = serializable
     except Exception as exc:
         log.exception("Search failed")
-        await wait.edit_text(f"⚠️ Search failed: <code>{html.escape(str(exc)[:500])}</code>", reply_markup=main_menu())
+        await wait.edit_text(f"⚠️ Search failed: <code>{html.escape(str(exc)[:500])}</code>", reply_markup=main_menu(ACTIVE_PROVIDER))
         return
 
     if not results:
         await wait.edit_text(
-            "No results found. Try another phrase or paste a direct Beeg video URL.",
-            reply_markup=main_menu(),
+            f"No {provider_name} results found. Try another phrase or switch the source from the main menu.",
+            reply_markup=main_menu(ACTIVE_PROVIDER),
         )
         return
 
@@ -570,7 +606,7 @@ async def process_search(message: Message, state: FSMContext):
         + f"🆔 <code>{html.escape(first['video_id'])}</code>\n"
         + f"📍 <b>Result 1 of {len(serializable)}</b>"
     )
-    markup = gallery_keyboard(0, len(serializable), first["url"])
+    markup = gallery_keyboard(0, len(serializable), first["url"], provider)
     if first.get("thumbnail"):
         try:
             await wait.delete()
@@ -589,7 +625,7 @@ async def select_video(call: CallbackQuery):
     video_id = call.data.split(":", 1)[1]
     url = f"https://beeg.com/-0{video_id}"
     await call.answer("Added to download pipeline")
-    await run_download(url, f"Beeg video {video_id}", call.message)
+    await run_download(url, f"Beeg video {video_id}", call.message, "beeg")
 
 
 async def main():

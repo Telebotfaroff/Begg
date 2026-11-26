@@ -58,7 +58,7 @@ def video_actions(url: str) -> InlineKeyboardMarkup:
     return search_result_keyboard(url, 1)
 
 
-def settings_keyboard(quality: str, downloads: int, uploads: int, interval: int, busy: bool = False) -> InlineKeyboardMarkup:
+def settings_keyboard(quality: str, downloads: int, uploads: int, interval: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for value in ("best", "half", "worst"):
         kb.button(text=f"{'✓ ' if quality == value else ''}Quality: {value}", callback_data=f"settings:quality:{value}")
@@ -71,5 +71,5 @@ def settings_keyboard(quality: str, downloads: int, uploads: int, interval: int,
     kb.button(text="🩺 Provider health", callback_data="menu:health")
     kb.button(text="🔄 Refresh settings", callback_data="menu:settings")
     kb.button(text="🏠 Main menu", callback_data="menu:home")
-    kb.adjust(3, 5, 2, 4, 1, 2, 1)
+    kb.adjust(3, 5, 2, 4, 1, 1, 1)
     return kb.as_markup()

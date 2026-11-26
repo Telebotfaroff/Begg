@@ -1,17 +1,37 @@
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from services.providers import PROVIDERS
 
 
 def main_menu(provider: str = "eporner") -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🔎  Search videos", callback_data="menu:search")
-    kb.button(
-        text=f"🔁  Source: {'ePorner' if provider == 'eporner' else 'Beeg'}",
-        callback_data="menu:provider",
-    )
+    spec = PROVIDERS.get(provider)
+    kb.button(text=f"🔁  Source: {spec.name if spec else provider}", callback_data="menu:provider")
     kb.button(text="📊  Active tasks", callback_data="menu:tasks")
     kb.button(text="⚙️  Settings", callback_data="menu:settings")
     kb.adjust(1, 1, 2)
+    return kb.as_markup()
+
+
+def provider_picker_keyboard(active: str, page: int = 0) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    keys = list(PROVIDERS)
+    page_size = 8
+    page_count = (len(keys) + page_size - 1) // page_size
+    page = max(0, min(page, page_count - 1))
+    for key in keys[page * page_size:(page + 1) * page_size]:
+        spec = PROVIDERS[key]
+        kb.button(text=f"{'✓ ' if key == active else ''}{spec.name}", callback_data=f"provider:set:{key}")
+    kb.adjust(2)
+    if page_count > 1:
+        if page > 0:
+            kb.button(text="◀️ Previous", callback_data=f"provider:page:{page - 1}")
+        kb.button(text=f"{page + 1}/{page_count}", callback_data=f"provider:page:{page}")
+        if page < page_count - 1:
+            kb.button(text="Next ▶️", callback_data=f"provider:page:{page + 1}")
+        kb.adjust(2, 2, 2, 2, 2)
+    kb.button(text="🏠 Main menu", callback_data="menu:home")
     return kb.as_markup()
 
 
@@ -21,7 +41,8 @@ def gallery_keyboard(index: int, total: int, url: str, provider: str = "eporner"
     kb.button(text=f"{index + 1} / {total}", callback_data="gallery:page")
     kb.button(text="Next ▶️", callback_data="gallery:next")
     kb.button(text="⬇️ Download this video", callback_data="gallery:download")
-    kb.button(text=f"↗️ Open on {'ePorner' if provider == 'eporner' else 'Beeg'}", url=url)
+    spec = PROVIDERS.get(provider)
+    kb.button(text=f"↗️ Open on {spec.name if spec else provider}", url=url)
     kb.button(text="🏠 Main menu", callback_data="menu:home")
     kb.adjust(3, 1, 1, 1)
     return kb.as_markup()

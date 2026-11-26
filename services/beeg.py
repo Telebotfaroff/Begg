@@ -66,7 +66,13 @@ def _extract_records(payload) -> list[dict]:
     records, seen = [], set()
     for item in _walk_dicts(payload):
         file_data = item.get("file") if isinstance(item.get("file"), dict) else {}
-        file_id = _first_value(file_data, "id", "file_id") or _first_value(item, "file_id", "fileId")
+        unit = item.get("unit") if isinstance(item.get("unit"), dict) else {}
+        unit_file = unit.get("file") if isinstance(unit.get("file"), dict) else {}
+        file_id = (
+            _first_value(file_data, "id", "file_id")
+            or _first_value(unit_file, "id", "file_id")
+            or _first_value(item, "file_id", "fileId")
+        )
         if not file_id:
             continue
         fact_id = _first_value(item, "id", "fact_id")
@@ -82,18 +88,28 @@ def _normalise_record(record: dict) -> SearchResult | None:
     unit = record.get("unit") if isinstance(record.get("unit"), dict) else {}
     if not file_data and isinstance(unit.get("file"), dict):
         file_data = unit["file"]
-    file_id = _first_value(file_data, "id", "file_id") or _first_value(record, "file_id", "fileId")
+    file_id = (
+        _first_value(file_data, "id", "file_id")
+        or _first_value(unit.get("file", {}) if isinstance(unit.get("file"), dict) else {}, "id", "file_id")
+        or _first_value(record, "file_id", "fileId")
+    )
     if not file_id or not str(file_id).isdigit():
         return None
     video_id = str(file_id)
     fact = record.get("fact") if isinstance(record.get("fact"), dict) else {}
+    facts = unit.get("fc_facts") if isinstance(unit.get("fc_facts"), list) else []
+    latest_fact = facts[-1] if facts and isinstance(facts[-1], dict) else {}
     title = (
         _first_value(record, "title", "video_title", "name")
         or _first_value(unit, "title", "video_title", "name")
         or _first_value(fact, "title", "name")
+        or _first_value(latest_fact, "title", "name")
         or f"Beeg video {video_id}"
     )
-    thumbs = record.get("thumbs") or record.get("fc_thumbs") or unit.get("thumbs") or []
+    thumbs = (
+        record.get("thumbs") or record.get("fc_thumbs")
+        or unit.get("thumbs") or latest_fact.get("fc_thumbs") or []
+    )
     thumb_id = None
     if isinstance(thumbs, list) and thumbs and isinstance(thumbs[0], dict):
         thumb_id = _first_value(thumbs[0], "id", "offset", "fc_thumb")
@@ -139,7 +155,7 @@ async def _websocket_search(query: str, limit: int, category_id: int | None = No
         },
     }
     async with websockets.connect(
-        SEARCH_WS, open_timeout=15, close_timeout=5,
+        SEARCH_WS, origin=BEEG_ORIGIN, open_timeout=15, close_timeout=5,
         ping_interval=20, ping_timeout=20, max_size=8 * 1024 * 1024,
     ) as socket:
         await socket.send(json.dumps(request))
@@ -165,11 +181,10 @@ async def search_videos(query: str, limit: int = 10) -> list[SearchResult]:
     term = query.strip().strip("/")
     if not term:
         return []
-    category_id = None
-    if re.fullmatch(r"[A-Za-z0-9_-]{2,80}", term):
-        async with AsyncSession(impersonate="chrome") as session:
-            category_id = await _resolve_category_id(session, term.lower())
-    payload = await _websocket_search(term, max(1, min(int(limit), 50)), category_id)
+    # This entry point is keyword search. Category browsing is a separate
+    # frontend operation; guessing a category from a one-word query can turn
+    # ordinary searches into invalid search_category requests.
+    payload = await _websocket_search(term, max(1, min(int(limit), 50)))
     results, seen = [], set()
     for record in _extract_records(payload):
         item = _normalise_record(record)

@@ -98,8 +98,8 @@ async def start_wzgram() -> WZClient:
 async def send_progress(message: Message, text: str) -> None:
     try:
         await message.edit_text(text)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("Progress message update failed: %s", exc)
 
 
 async def run_media_command(*args: str) -> tuple[int, str, str]:
@@ -336,31 +336,55 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
             if metadata_lines:
                 await send_progress(
                     status,
-                    "⬇️ <b>Downloading</b>\n"
-                    f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
-                    + "\n".join(metadata_lines)
-                    + f"\n\nPreparing {download_mode} stream…",
+                    "⬇️ <b>Downloading</b>\\n"
+                    f"<blockquote>{html.escape(title[:180])}</blockquote>\\n"
+                    + "\\n".join(metadata_lines)
+                    + f"\\n\\nPreparing {download_mode} stream…",
                 )
             if provider == "eporner":
                 download_task = asyncio.create_task(video.download(configuration=config, mode=EpornerEncoding.mp4_h264))
             else:
                 download_task = asyncio.create_task(video.download(configuration=config))
-            last_size = -1
+
+            # Measure bytes written between samples for live transfer speed.
+            # The final sample also covers downloads that finish very quickly.
+            last_sample_time = download_started
+            last_sample_size = 0
+            last_rendered_size = -1
             while not download_task.done():
-                await asyncio.sleep(settings.update_interval)
-                current_size = sum(p.stat().st_size for p in task_dir.rglob("*") if p.is_file())
-                if current_size != last_size:
-                    elapsed = max(time.monotonic() - download_started, 0.001)
-                    speed = current_size / elapsed
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(download_task),
+                        timeout=max(1, min(settings.update_interval, 3)),
+                    )
+                except asyncio.TimeoutError:
+                    pass
+
+                now = time.monotonic()
+                current_size = sum(
+                    p.stat().st_size for p in task_dir.rglob("*")
+                    if p.is_file()
+                )
+                delta_time = max(now - last_sample_time, 0.001)
+                average_speed = current_size / max(now - download_started, 0.001)
+                live_speed = max(0, current_size - last_sample_size) / delta_time
+
+                if current_size != last_rendered_size or download_task.done():
+                    shown_speed = live_speed if current_size > last_sample_size else average_speed
+                    speed_label = f"{pretty_size(shown_speed)}/s" if current_size else "Waiting for data…"
                     await send_progress(
                         status,
-                        "⬇️ <b>Downloading</b>\n"
-                        f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
-                        f"📦 {pretty_size(current_size)} downloaded\n"
-                        f"⚡ {pretty_size(speed)}/s  ·  ⏳ ETA calculating\n"
-                        f"<i>Live {download_mode} transfer — final size is confirmed when complete.</i>",
+                        "⬇️ <b>Downloading</b>\\n"
+                        f"<blockquote>{html.escape(title[:180])}</blockquote>\\n"
+                        f"📦 {pretty_size(current_size)} downloaded\\n"
+                        f"⚡ {speed_label}  ·  ⏳ ETA unavailable until total size is known\\n"
+                        f"<i>{download_mode} transfer · live speed from file growth.</i>",
                     )
-                    last_size = current_size
+                    last_rendered_size = current_size
+
+                last_sample_time = now
+                last_sample_size = current_size
+
             download_result = await download_task
             if download_result is False or getattr(download_result, "status", None) == "failed":
                 raise RuntimeError(f"{get_spec(provider).name} API reported that the download failed.")

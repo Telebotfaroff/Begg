@@ -86,6 +86,9 @@ def _extract_records(payload) -> list[dict]:
 def _normalise_record(record: dict) -> SearchResult | None:
     file_data = record.get("file") if isinstance(record.get("file"), dict) else {}
     unit = record.get("unit") if isinstance(record.get("unit"), dict) else {}
+    # Search responses may contain a wrapper with "unit" or the unit itself.
+    if not unit and isinstance(record.get("file"), dict):
+        unit = record
     if not file_data and isinstance(unit.get("file"), dict):
         file_data = unit["file"]
     file_id = (
@@ -111,8 +114,12 @@ def _normalise_record(record: dict) -> SearchResult | None:
         or unit.get("thumbs") or latest_fact.get("fc_thumbs") or []
     )
     thumb_id = None
-    if isinstance(thumbs, list) and thumbs and isinstance(thumbs[0], dict):
-        thumb_id = _first_value(thumbs[0], "id", "offset", "fc_thumb")
+    if isinstance(thumbs, list) and thumbs:
+        first_thumb = thumbs[0]
+        if isinstance(first_thumb, dict):
+            thumb_id = _first_value(first_thumb, "id", "offset", "fc_thumb")
+        elif isinstance(first_thumb, (str, int)):
+            thumb_id = first_thumb
     offset = str(thumb_id if thumb_id is not None else 0)
     return SearchResult(
         title=re.sub(r"\s+", " ", str(title)).strip()[:240],

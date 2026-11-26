@@ -198,5 +198,11 @@ def make_download_config(provider: str, quality: str, path: str):
     if config_type is None:
         config_type = getattr(module, "DownloadConfigHLS", None) or getattr(module, "DownloadConfigRAW", None)
     if config_type is None:
+        try:
+            shared = importlib.import_module("base_api")
+            config_type = getattr(shared, "DownloadConfigHLS", None) or getattr(shared, "DownloadConfigRAW", None)
+        except ImportError:
+            config_type = None
+    if config_type is None:
         return None
     return config_type(quality=quality, path=path)

@@ -26,6 +26,7 @@ from config import settings
 from services.eporner import clean_video_url as clean_eporner_video_url, fetch_category_videos as fetch_eporner_category_videos, get_video as get_eporner_video, is_category_url as is_eporner_category_url, search_videos as search_eporner_videos
 from services.providers import PROVIDERS, DEFAULT_PROVIDER, get_spec, get_video as get_generic_video, make_download_config, provider_for_url, search_videos as search_generic_videos
 from services.provider_health import check_all_providers
+from services.scraper_center import (scrape_search, scrape_homepage, list_categories, scrape_category, scrape_profile, export_json, export_csv)
 from ui.keyboards import main_menu, gallery_keyboard, settings_keyboard, provider_picker_keyboard
 
 logging.basicConfig(
@@ -39,6 +40,7 @@ download_slots = asyncio.Semaphore(settings.download_concurrency)
 upload_slots = asyncio.Semaphore(settings.upload_concurrency)
 active_downloads: dict[str, dict] = {}
 task_handles: dict[str, asyncio.Task] = {}
+scrape_handles: dict[int, asyncio.Task] = {}
 PROCESS_STARTED = time.monotonic()
 ACTIVE_PROVIDER = DEFAULT_PROVIDER
 uploader: WZClient | None = None
@@ -46,6 +48,10 @@ uploader: WZClient | None = None
 
 class SearchFlow(StatesGroup):
     waiting_query = State()
+
+
+class ScraperFlow(StatesGroup):
+    waiting_input = State()
 
 
 def is_admin(user_id: int | None) -> bool:
@@ -935,6 +941,265 @@ async def process_search(message: Message, state: FSMContext):
             await message.answer(caption + "\n<i>Thumbnail unavailable</i>", reply_markup=markup)
     else:
         await wait.edit_text(caption + "\n<i>Thumbnail unavailable</i>", reply_markup=markup)
+
+
+
+
+def scraper_menu_markup():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🏠 Homepage / listings", callback_data="scraper:home")
+    kb.button(text="🗂 Categories", callback_data="scraper:categories")
+    kb.button(text="📚 Bulk scrape", callback_data="scraper:bulk")
+    kb.button(text="👤 Profile / channel", callback_data="scraper:profile")
+    kb.button(text="🔁 Change source", callback_data="menu:provider")
+    kb.button(text="🏠 Main menu", callback_data="menu:home")
+    kb.adjust(1, 1, 2, 1, 1)
+    return kb.as_markup()
+
+
+def scraper_result_markup():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📄 Export JSON", callback_data="scraper:export:json")
+    kb.button(text="📊 Export CSV", callback_data="scraper:export:csv")
+    kb.button(text="🧭 Scraper Center", callback_data="menu:scraper")
+    kb.button(text="🏠 Main menu", callback_data="menu:home")
+    kb.adjust(2, 1, 1)
+    return kb.as_markup()
+
+
+async def finish_scrape(call: CallbackQuery, state: FSMContext, label: str, operation):
+    provider = ACTIVE_PROVIDER
+    name = get_spec(provider).name
+    status = await call.message.answer(
+        f"🔎 <b>Scraper Center</b>\n{name} · {html.escape(label)}\n\n⏳ Scraping metadata…",
+        reply_markup=InlineKeyboardBuilder().button(
+            text="⏹ Cancel scrape", callback_data="scraper:cancel"
+        ).as_markup(),
+    )
+    task = asyncio.create_task(operation)
+    scrape_handles[call.from_user.id] = task
+    await call.answer("Scrape started")
+    try:
+        items = await task
+        await state.update_data(scrape_results=items, scrape_provider=provider)
+        if not items:
+            await status.edit_text(
+                f"ℹ️ <b>No results returned</b>\n{name} · {html.escape(label)}",
+                reply_markup=scraper_menu_markup(),
+            )
+            return
+        preview = [
+            f"{index}. {html.escape(item['title'][:105])}"
+            for index, item in enumerate(items[:12], 1)
+        ]
+        extra = f"\n…and {len(items) - 12} more" if len(items) > 12 else ""
+        await status.edit_text(
+            f"✅ <b>Scrape complete</b>\n"
+            f"📍 Source: <b>{html.escape(name)}</b>\n"
+            f"📦 Results: <b>{len(items)}</b>\n"
+            f"🔗 Unique video URLs only\n\n"
+            + "\n".join(preview) + extra + "\n\nChoose an export format:",
+            reply_markup=scraper_result_markup(),
+        )
+    except asyncio.CancelledError:
+        await status.edit_text("⏹️ <b>Scrape cancelled.</b>", reply_markup=scraper_menu_markup())
+    except Exception as exc:
+        log.exception("Scraper Center failed")
+        await status.edit_text(
+            f"❌ <b>Scrape failed</b>\n<code>{html.escape(str(exc)[:700])}</code>",
+            reply_markup=scraper_menu_markup(),
+        )
+    finally:
+        if scrape_handles.get(call.from_user.id) is task:
+            scrape_handles.pop(call.from_user.id, None)
+
+
+@router.callback_query(F.data == "menu:scraper")
+async def scraper_center_button(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    await state.clear()
+    await call.message.edit_text(
+        "🧭 <b>BEGG Scraper Center</b>\n"
+        f"Active source: <b>{html.escape(get_spec(ACTIVE_PROVIDER).name)}</b>\n\n"
+        "Scrape video metadata without downloading media.\n"
+        "Choose a listing, category, multiple pages, or a creator/channel.",
+        reply_markup=scraper_menu_markup(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("scraper:home"))
+async def scraper_home(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    await state.clear()
+    await finish_scrape(
+        call, state, "Homepage · latest",
+        scrape_homepage(ACTIVE_PROVIDER, "latest", pages=3, limit=100),
+    )
+
+
+@router.callback_query(F.data == "scraper:categories")
+async def scraper_categories(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    await call.answer("Loading categories…")
+    try:
+        categories = await list_categories(ACTIVE_PROVIDER)
+        category_text = "\n".join(f"• {html.escape(value[:100])}" for value in categories[:40])
+        suffix = f"\n…and {len(categories) - 40} more" if len(categories) > 40 else ""
+        await state.set_state(ScraperFlow.waiting_input)
+        await state.update_data(scrape_mode="category")
+        await call.message.edit_text(
+            f"🗂 <b>{html.escape(get_spec(ACTIVE_PROVIDER).name)} categories</b>\n\n"
+            + (category_text if category_text else "No category names were returned.")
+            + suffix
+            + "\n\nSend the category URL or exact category name to scrape it.",
+            reply_markup=InlineKeyboardBuilder().button(
+                text="✕ Cancel", callback_data="menu:scraper"
+            ).as_markup(),
+        )
+    except Exception as exc:
+        await call.message.edit_text(
+            f"⚠️ <b>Categories unavailable</b>\n<code>{html.escape(str(exc)[:500])}</code>\n\n"
+            "You can still paste a category URL using Bulk scrape.",
+            reply_markup=scraper_menu_markup(),
+        )
+
+
+@router.callback_query(F.data == "scraper:bulk")
+async def scraper_bulk(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    await state.set_state(ScraperFlow.waiting_input)
+    await state.update_data(scrape_mode="bulk")
+    await call.message.edit_text(
+        "📚 <b>Bulk scrape</b>\n\n"
+        "Send one line in this format:\n"
+        "<code>search phrase | start page | end page | max results</code>\n\n"
+        "Example: <code>example query | 1 | 5 | 200</code>\n"
+        "Defaults: pages 1–3, max 100. Page range is capped at 50 pages and results at 1,000.",
+        reply_markup=InlineKeyboardBuilder().button(
+            text="✕ Cancel", callback_data="menu:scraper"
+        ).as_markup(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "scraper:profile")
+async def scraper_profile_prompt(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    await state.set_state(ScraperFlow.waiting_input)
+    await state.update_data(scrape_mode="profile")
+    await call.message.edit_text(
+        "👤 <b>Profile / channel scrape</b>\n\n"
+        "Send the full profile, channel, playlist or creator URL.\n"
+        "Optional format: <code>URL | pages | max results</code>\n"
+        "Defaults: 3 pages, max 100.",
+        reply_markup=InlineKeyboardBuilder().button(
+            text="✕ Cancel", callback_data="menu:scraper"
+        ).as_markup(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "scraper:cancel")
+async def scraper_cancel(call: CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    task = scrape_handles.get(call.from_user.id)
+    if not task or task.done():
+        return await call.answer("No active scrape.", show_alert=True)
+    task.cancel()
+    await call.answer("Cancellation requested.")
+
+
+@router.message(ScraperFlow.waiting_input)
+async def process_scraper_input(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id if message.from_user else None):
+        return await deny(message)
+    raw = (message.text or "").strip()
+    if not raw:
+        return await message.answer("Send a category, search phrase, or profile URL.")
+    data = await state.get_data()
+    mode = data.get("scrape_mode")
+    await state.clear()
+    provider = ACTIVE_PROVIDER
+
+    if mode == "bulk":
+        parts = [part.strip() for part in raw.split("|")]
+        query = parts[0]
+        try:
+            start_page = int(parts[1]) if len(parts) > 1 and parts[1] else 1
+            end_page = int(parts[2]) if len(parts) > 2 and parts[2] else min(start_page + 2, 50)
+            limit = int(parts[3]) if len(parts) > 3 and parts[3] else 100
+        except ValueError:
+            return await message.answer("Page and result limits must be whole numbers.")
+        if not query or start_page < 1 or end_page < start_page or end_page - start_page > 49:
+            return await message.answer("Invalid input. Use a valid query and a page range of at most 50 pages.")
+        limit = max(1, min(limit, 1000))
+        proxy_call = CallbackQuery(
+            id="scrape-input", from_user=message.from_user, chat_instance="scrape",
+            message=message, data="scraper:input"
+        )
+        await finish_scrape(
+            proxy_call, state, f"Bulk · pages {start_page}–{end_page} · limit {limit}",
+            scrape_search(provider, query, start_page, end_page, limit),
+        )
+    elif mode == "category":
+        proxy_call = CallbackQuery(
+            id="scrape-input", from_user=message.from_user, chat_instance="scrape",
+            message=message, data="scraper:input"
+        )
+        await finish_scrape(
+            proxy_call, state, f"Category · {raw[:80]}",
+            scrape_category(provider, raw, pages=5, limit=200),
+        )
+    elif mode == "profile":
+        parts = [part.strip() for part in raw.split("|")]
+        url = parts[0]
+        try:
+            pages = int(parts[1]) if len(parts) > 1 and parts[1] else 3
+            limit = int(parts[2]) if len(parts) > 2 and parts[2] else 100
+        except ValueError:
+            return await message.answer("Page and result limits must be whole numbers.")
+        if pages < 1 or pages > 50:
+            return await message.answer("Choose between 1 and 50 pages.")
+        proxy_call = CallbackQuery(
+            id="scrape-input", from_user=message.from_user, chat_instance="scrape",
+            message=message, data="scraper:input"
+        )
+        await finish_scrape(
+            proxy_call, state, f"Profile · {url[:70]}",
+            scrape_profile(provider, url, pages, max(1, min(limit, 1000))),
+        )
+    else:
+        await message.answer("Scraper input expired. Open Scraper Center again.", reply_markup=scraper_menu_markup())
+
+
+@router.callback_query(F.data.startswith("scraper:export:"))
+async def scraper_export(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    data = await state.get_data()
+    items = data.get("scrape_results") or []
+    if not items:
+        return await call.answer("Scrape results expired. Run the scrape again.", show_alert=True)
+    kind = call.data.rsplit(":", 1)[-1]
+    if kind == "json":
+        payload, filename = export_json(items), "begg_scrape.json"
+    elif kind == "csv":
+        payload, filename = export_csv(items), "begg_scrape.csv"
+    else:
+        return await call.answer("Unknown export format.", show_alert=True)
+    await call.answer("Preparing export…")
+    await call.message.answer_document(
+        BufferedInputFile(payload, filename=filename),
+        caption=f"📦 {len(items)} metadata records · {html.escape(get_spec(data.get('scrape_provider', ACTIVE_PROVIDER)).name)}",
+    )
+
 
 
 async def main():

@@ -1030,14 +1030,34 @@ async def scraper_center_button(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@router.callback_query(F.data.startswith("scraper:home"))
-async def scraper_home(call: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == "scraper:home")
+async def scraper_home_menu(call: CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Not authorized", show_alert=True)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🆕 Latest", callback_data="scraper:home:latest")
+    kb.button(text="🔥 Popular", callback_data="scraper:home:popular")
+    kb.button(text="📈 Trending", callback_data="scraper:home:trending")
+    kb.button(text="↩️ Back", callback_data="menu:scraper")
+    kb.adjust(1)
+    await call.message.edit_text(
+        f"🏠 <b>{html.escape(get_spec(ACTIVE_PROVIDER).name)} listings</b>\nChoose a homepage feed:",
+        reply_markup=kb.as_markup(),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("scraper:home:"))
+async def scraper_home_run(call: CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Not authorized", show_alert=True)
+    listing = call.data.rsplit(":", 1)[-1]
+    if listing not in {"latest", "popular", "trending"}:
+        return await call.answer("Unknown listing type.", show_alert=True)
     await state.clear()
     await finish_scrape(
-        call.message, call.from_user.id, state, "Homepage · latest",
-        scrape_homepage(ACTIVE_PROVIDER, "latest", pages=3, limit=100), callback=call,
+        call.message, call.from_user.id, state, f"Homepage · {listing}",
+        scrape_homepage(ACTIVE_PROVIDER, listing, pages=3, limit=100), callback=call,
     )
 
 

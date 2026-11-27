@@ -1146,12 +1146,8 @@ async def process_scraper_input(message: Message, state: FSMContext):
             scrape_search(provider, query, start_page, end_page, limit),
         )
     elif mode == "category":
-        proxy_call = CallbackQuery(
-            id="scrape-input", from_user=message.from_user, chat_instance="scrape",
-            message=message, data="scraper:input"
-        )
         await finish_scrape(
-            proxy_call, state, f"Category · {raw[:80]}",
+            message, message.from_user.id, state, f"Category · {raw[:80]}",
             scrape_category(provider, raw, pages=5, limit=200),
         )
     elif mode == "profile":
@@ -1164,12 +1160,8 @@ async def process_scraper_input(message: Message, state: FSMContext):
             return await message.answer("Page and result limits must be whole numbers.")
         if pages < 1 or pages > 50:
             return await message.answer("Choose between 1 and 50 pages.")
-        proxy_call = CallbackQuery(
-            id="scrape-input", from_user=message.from_user, chat_instance="scrape",
-            message=message, data="scraper:input"
-        )
         await finish_scrape(
-            proxy_call, state, f"Profile · {url[:70]}",
+            message, message.from_user.id, state, f"Profile · {url[:70]}",
             scrape_profile(provider, url, pages, max(1, min(limit, 1000))),
         )
     else:

@@ -4,6 +4,22 @@
 
 A private, admin-only Telegram bot using the video API projects published by [EchterAlsFake](https://github.com/EchterAlsFake). **Pornhub is intentionally excluded.** ePorner is the default source.
 
+
+## Scraper Center (BEGG 2.1)
+
+The Telegram main menu includes **Scraper Center**, a metadata-only workflow separate from video downloads.
+
+- **Homepage / listings:** provider-specific latest/popular feeds where the API exposes a listing method.
+- **Categories:** list categories where supported, then scrape a category URL or exact category name.
+- **Bulk scrape:** search multiple pages with a configurable start page, end page and result cap.
+- **Profile / channel:** scrape supported playlists, channels, creators, models or profile URLs.
+- **Exports:** download the current in-memory result set as JSON or CSV.
+- **Deduplication:** duplicate video URLs are removed before results are shown.
+- **No database:** results live in Telegram FSM memory and disappear when the runtime/session state is cleared.
+- **No media transfer:** Scraper Center only collects metadata; it does not download or upload videos.
+
+Provider support is method-specific. Not every API exposes homepage listings, category indexes or profile methods. Bulk search is available wherever the provider exposes a compatible search method. Page counts and result limits are bounded by the bot UI; upstream APIs may impose additional pagination limits.
+
 ## Providers
 
 The source picker includes 15 providers not flagged as API failures in the diagnostic report:

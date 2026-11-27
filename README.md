@@ -20,6 +20,14 @@ The Telegram main menu includes **Scraper Center**, a metadata-only workflow sep
 
 Provider support is method-specific. Not every API exposes homepage listings, category indexes or profile methods. Bulk search is available wherever the provider exposes a compatible search method. Page counts and result limits are bounded by the bot UI; upstream APIs may impose additional pagination limits.
 
+### Current API coverage
+
+- Bulk search is wired through each provider's `search_videos` or `search` method, with pagination parameters passed only when the installed API exposes them.
+- Known homepage/listing adapters are currently available for **HQPorner, Bellesa, PornHat and YouJizz**. The feed type selector offers latest, popular and trending; each provider maps these to its own sort/listing enum when available.
+- Category indexes are provider-dependent. Known category-list methods are available on **HQPorner, Bellesa, PornHat and YouJizz**. ePorner can scrape a category URL directly even without a category index.
+- Profile/playlist scraping is discovered from supported API methods such as playlist, channel, site, model, creator, user and pornstar methods. A provider may not implement every profile type.
+- A requested non-first bulk page is rejected when the provider method does not expose a start-page parameter, rather than silently scraping the wrong pages.
+
 ## Providers
 
 The source picker includes 15 providers not flagged as API failures in the diagnostic report:

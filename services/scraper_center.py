@@ -86,6 +86,8 @@ def _listing_members(listing: str) -> tuple[str, ...]:
 async def _call_pages(method, query: str | None, start_page: int, pages: int, limit: int):
     signature = inspect.signature(method)
     params = signature.parameters
+    if start_page != 1 and "start_page" not in params:
+        raise RuntimeError("This provider API does not support starting from a later page.")
     kwargs = {}
     if "pages" in params:
         kwargs["pages"] = pages

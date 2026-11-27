@@ -6,13 +6,14 @@ from services.providers import PROVIDERS
 def main_menu(provider: str = "eporner") -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="🔎  Search videos", callback_data="menu:search")
+    kb.button(text="🧭  Scraper Center", callback_data="menu:scraper")
     spec = PROVIDERS.get(provider)
     kb.button(text=f"🔁  Source: {spec.name if spec else provider}", callback_data="menu:provider")
     kb.button(text="📊  Active tasks", callback_data="menu:tasks")
     kb.button(text="🖥️  System monitor", callback_data="menu:system")
     kb.button(text="🩺  Provider health", callback_data="menu:health")
     kb.button(text="⚙️  Settings", callback_data="menu:settings")
-    kb.adjust(1, 1, 2, 1, 1)
+    kb.adjust(1, 1, 1, 2, 1, 1)
     return kb.as_markup()
 
 

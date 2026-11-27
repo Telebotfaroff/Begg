@@ -336,10 +336,10 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
             if metadata_lines:
                 await send_progress(
                     status,
-                    "⬇️ <b>Downloading</b>\\n"
-                    f"<blockquote>{html.escape(title[:180])}</blockquote>\\n"
-                    + "\\n".join(metadata_lines)
-                    + f"\\n\\nPreparing {download_mode} stream…",
+                    "⬇️ <b>Downloading</b>\n"
+                    f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
+                    + "\n".join(metadata_lines)
+                    + f"\n\nPreparing {download_mode} stream…",
                 )
             if provider == "eporner":
                 download_task = asyncio.create_task(video.download(configuration=config, mode=EpornerEncoding.mp4_h264))
@@ -381,10 +381,10 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
                     speed_label = f"{pretty_size(shown_speed)}/s" if current_size else "Waiting for data…"
                     await send_progress(
                         status,
-                        "⬇️ <b>Downloading</b>\\n"
-                        f"<blockquote>{html.escape(title[:180])}</blockquote>\\n"
-                        f"📦 {pretty_size(current_size)} downloaded\\n"
-                        f"⚡ {speed_label}  ·  ⏳ ETA unavailable until total size is known\\n"
+                        "⬇️ <b>Downloading</b>\n"
+                        f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
+                        f"📦 {pretty_size(current_size)} downloaded\n"
+                        f"⚡ {speed_label}  ·  ⏳ ETA unavailable until total size is known\n"
                         f"<i>{download_mode} transfer · live speed from file growth.</i>",
                     )
                     last_rendered_size = current_size
@@ -401,9 +401,9 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
                 speed_label = f"{pretty_size(current_size / elapsed)}/s" if current_size else "No file data observed"
                 await send_progress(
                     status,
-                    "⬇️ <b>Download finished</b>\\n"
-                    f"<blockquote>{html.escape(title[:180])}</blockquote>\\n"
-                    f"📦 {pretty_size(current_size)} downloaded\\n"
+                    "⬇️ <b>Download finished</b>\n"
+                    f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
+                    f"📦 {pretty_size(current_size)} downloaded\n"
                     f"⚡ Average speed: {speed_label}",
                 )
 
@@ -484,7 +484,7 @@ async def start(message: Message, state: FSMContext):
         "Welcome back! Choose an action below.\n\n"
         "🔎 <b>Search</b> videos from the selected source or paste a video link\n"
         f"🔁 <b>Source</b> choose from {len(PROVIDERS)} video APIs\n"
-        "📊 <b>Tasks</b> monitor and control transfers\\n"
+        "📊 <b>Tasks</b> monitor and control transfers\n"
         "🖥️ <b>System</b> inspect runtime resources",
         reply_markup=main_menu(ACTIVE_PROVIDER),
     )

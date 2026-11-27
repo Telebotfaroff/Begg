@@ -228,18 +228,17 @@ async def upload_file(path: Path, title: str, progress_message: Message, key: st
     async def progress(current: int, total: int) -> None:
         nonlocal last_update, last_bytes, last_time
         now = time.monotonic()
-        if now - last_update < settings.update_interval and current < total:
-            return
         elapsed = max(now - started, 0.001)
         delta_time = max(now - last_time, 0.001)
         speed = max(0, current - last_bytes) / delta_time
         percent = (current / total * 100) if total else 0
         remaining = max(0, total - current)
         eta = remaining / max(speed, 1) if speed else 0
-        elapsed = max(now - started, 0.001)
         task = active_downloads.get(key)
         if task is not None:
             task.update({"current": current, "total": total or file_size, "speed": speed, "percent": percent, "eta": eta, "elapsed": elapsed})
+        if now - last_update < settings.update_interval and current < total:
+            return
         text = (
             "📤 <b>Uploading to Telegram</b>\n"
             f"<blockquote>{html.escape(title[:180])}</blockquote>\n"

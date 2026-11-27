@@ -967,18 +967,19 @@ def scraper_result_markup():
     return kb.as_markup()
 
 
-async def finish_scrape(call: CallbackQuery, state: FSMContext, label: str, operation):
+async def finish_scrape(message: Message, user_id: int, state: FSMContext, label: str, operation, callback: CallbackQuery | None = None):
     provider = ACTIVE_PROVIDER
     name = get_spec(provider).name
-    status = await call.message.answer(
+    status = await message.answer(
         f"🔎 <b>Scraper Center</b>\n{name} · {html.escape(label)}\n\n⏳ Scraping metadata…",
         reply_markup=InlineKeyboardBuilder().button(
             text="⏹ Cancel scrape", callback_data="scraper:cancel"
         ).as_markup(),
     )
     task = asyncio.create_task(operation)
-    scrape_handles[call.from_user.id] = task
-    await call.answer("Scrape started")
+    scrape_handles[user_id] = task
+    if callback is not None:
+        await callback.answer("Scrape started")
     try:
         items = await task
         await state.update_data(scrape_results=items, scrape_provider=provider)
@@ -1010,8 +1011,8 @@ async def finish_scrape(call: CallbackQuery, state: FSMContext, label: str, oper
             reply_markup=scraper_menu_markup(),
         )
     finally:
-        if scrape_handles.get(call.from_user.id) is task:
-            scrape_handles.pop(call.from_user.id, None)
+        if scrape_handles.get(user_id) is task:
+            scrape_handles.pop(user_id, None)
 
 
 @router.callback_query(F.data == "menu:scraper")
@@ -1035,8 +1036,8 @@ async def scraper_home(call: CallbackQuery, state: FSMContext):
         return await call.answer("Not authorized", show_alert=True)
     await state.clear()
     await finish_scrape(
-        call, state, "Homepage · latest",
-        scrape_homepage(ACTIVE_PROVIDER, "latest", pages=3, limit=100),
+        call.message, call.from_user.id, state, "Homepage · latest",
+        scrape_homepage(ACTIVE_PROVIDER, "latest", pages=3, limit=100), callback=call,
     )
 
 
@@ -1140,12 +1141,8 @@ async def process_scraper_input(message: Message, state: FSMContext):
         if not query or start_page < 1 or end_page < start_page or end_page - start_page > 49:
             return await message.answer("Invalid input. Use a valid query and a page range of at most 50 pages.")
         limit = max(1, min(limit, 1000))
-        proxy_call = CallbackQuery(
-            id="scrape-input", from_user=message.from_user, chat_instance="scrape",
-            message=message, data="scraper:input"
-        )
         await finish_scrape(
-            proxy_call, state, f"Bulk · pages {start_page}–{end_page} · limit {limit}",
+            message, message.from_user.id, state, f"Bulk · pages {start_page}–{end_page} · limit {limit}",
             scrape_search(provider, query, start_page, end_page, limit),
         )
     elif mode == "category":

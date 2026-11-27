@@ -214,7 +214,7 @@ async def prepare_streamable_video(source: Path) -> tuple[Path, Path, dict]:
     return target, thumb_path, metadata
 
 
-async def upload_file(path: Path, title: str, progress_message: Message) -> None:
+async def upload_file(path: Path, title: str, progress_message: Message, key: str) -> None:
     if uploader is None:
         raise RuntimeError("WZGram uploader is not initialized")
 
@@ -236,12 +236,17 @@ async def upload_file(path: Path, title: str, progress_message: Message) -> None
         percent = (current / total * 100) if total else 0
         remaining = max(0, total - current)
         eta = remaining / max(speed, 1) if speed else 0
+        elapsed = max(now - started, 0.001)
+        task = active_downloads.get(key)
+        if task is not None:
+            task.update({"current": current, "total": total or file_size, "speed": speed, "percent": percent, "eta": eta, "elapsed": elapsed})
         text = (
             "📤 <b>Uploading to Telegram</b>\n"
             f"<blockquote>{html.escape(title[:180])}</blockquote>\n"
             f"{progress_bar(percent)} <b>{percent:.1f}%</b>\n"
-            f"📦 {pretty_size(current)} / {pretty_size(total or file_size)}\n"
-            f"⚡ {pretty_size(speed)}/s  ·  ⏳ {int(eta)}s left"
+            f"📦 <b>{pretty_size(current)}</b> / {pretty_size(total or file_size)}\n"
+            f"⚡ {pretty_size(speed)}/s  ·  ⏳ ETA {int(eta)}s\n"
+            f"🕒 Elapsed: {int(elapsed)}s"
         )
         await send_progress(progress_message, text)
         last_update, last_bytes, last_time = now, current, now
@@ -437,7 +442,7 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
 
         async with upload_slots:
             active_downloads[key]["status"] = "uploading"
-            await upload_file(output, actual_title, status)
+            await upload_file(output, actual_title, status, key)
 
         await send_progress(
             status,
@@ -573,10 +578,15 @@ def build_task_monitor_text() -> str:
     rows = ["📊 <b>Task monitor</b>", ""]
     for key, item in active_downloads.items():
         short_id = key.rsplit(":", 1)[-1]
-        rows.append(
-            f"{icons.get(item.get('status'), '•')} <b>{html.escape(item.get('title', 'Untitled')[:65])}</b>\n"
-            f"   <code>#{short_id[-7:]}</code> · {item.get('status', 'unknown').replace('_', ' ')}"
-        )
+        detail = f"   <code>#{short_id[-7:]}</code> · {item.get('status', 'unknown').replace('_', ' ')}"
+        current = int(item.get("current") or 0)
+        total = int(item.get("total") or 0)
+        speed = float(item.get("speed") or 0)
+        if item.get("status") == "uploading" and total:
+            detail += f"\n   {float(item.get('percent') or 0):.1f}% · {pretty_size(current)} / {pretty_size(total)} · {pretty_size(speed)}/s"
+        elif item.get("status") == "downloading" and current:
+            detail += f"\n   {pretty_size(current)} downloaded · {pretty_size(speed)}/s"
+        rows.append(f"{icons.get(item.get('status'), '•')} <b>{html.escape(item.get('title', 'Untitled')[:65])}</b>\n{detail}")
     rows.append("")
     rows.append(f"Active: <b>{len(active_downloads)}</b> · Download slots: <b>{settings.download_concurrency}</b> · Upload slots: <b>{settings.upload_concurrency}</b>")
     return "\n".join(rows)

@@ -372,6 +372,13 @@ async def run_download(video_url: str, title_hint: str, origin: Message, provide
 
                 if current_size != last_rendered_size or download_task.done():
                     shown_speed = live_speed if current_size > last_sample_size else average_speed
+                    active_downloads[key].update({
+                        "current": current_size,
+                        "total": 0,
+                        "speed": shown_speed,
+                        "percent": None,
+                        "elapsed": max(now - download_started, 0.0),
+                    })
                     speed_label = f"{pretty_size(shown_speed)}/s" if current_size else "Waiting for data…"
                     await send_progress(
                         status,

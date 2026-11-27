@@ -1082,10 +1082,14 @@ async def scraper_categories(call: CallbackQuery, state: FSMContext):
             ).as_markup(),
         )
     except Exception as exc:
+        await state.set_state(ScraperFlow.waiting_input)
+        await state.update_data(scrape_mode="category")
         await call.message.edit_text(
-            f"⚠️ <b>Categories unavailable</b>\n<code>{html.escape(str(exc)[:500])}</code>\n\n"
-            "You can still paste a category URL using Bulk scrape.",
-            reply_markup=scraper_menu_markup(),
+            f"ℹ️ <b>Category index not exposed</b>\n<code>{html.escape(str(exc)[:350])}</code>\n\n"
+            "This provider may still support direct category scraping. Send a category URL or exact category name.",
+            reply_markup=InlineKeyboardBuilder().button(
+                text="✕ Cancel", callback_data="menu:scraper"
+            ).as_markup(),
         )
 
 

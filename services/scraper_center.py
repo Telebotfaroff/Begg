@@ -64,9 +64,23 @@ async def _collect(value: Any, provider: str, limit: int) -> list[dict]:
     return output
 
 
-def _enum_value(module, enum_name: str, member: str, fallback: str):
-    enum_type = getattr(module, enum_name, None)
-    return getattr(enum_type, member, fallback) if enum_type else fallback
+def _enum_value(module, enum_names: tuple[str, ...], members: tuple[str, ...], fallback: str):
+    for enum_name in enum_names:
+        enum_type = getattr(module, enum_name, None)
+        if enum_type:
+            for member in members:
+                value = getattr(enum_type, member, None)
+                if value is not None:
+                    return value
+    return fallback
+
+
+def _listing_members(listing: str) -> tuple[str, ...]:
+    if listing == "latest":
+        return ("RECENT", "NEW", "LATEST", "RECENTLY_ADDED")
+    if listing == "trending":
+        return ("TRENDING", "HOT", "POPULAR", "MOST_VIEWED")
+    return ("POPULAR", "MOST_VIEWED", "TOP", "TRENDING")
 
 
 async def _call_pages(method, query: str | None, start_page: int, pages: int, limit: int):
@@ -129,11 +143,22 @@ async def scrape_homepage(provider: str, listing: str, pages: int, limit: int) -
     if "pages" in params:
         kwargs["pages"] = pages
     if "sort_by" in params:
-        kwargs["sort_by"] = listing
+        sort_values = {
+            "latest": ("RECENT", "NEW", "LATEST", "DATE"),
+            "popular": ("VIEWS", "POPULAR", "MOST_VIEWED", "TOP"),
+            "trending": ("TRENDING", "HOT", "RATING", "POPULAR"),
+        }
+        kwargs["sort_by"] = _enum_value(
+            module, ("SortBy", "Sort", "Sorting"), sort_values.get(listing, ("POPULAR",)), listing
+        )
     if "sort" in params:
-        kwargs["sort"] = _enum_value(module, "Sort", "NEW" if listing == "latest" else "RECENT", listing)
+        kwargs["sort"] = _enum_value(
+            module, ("Sort", "VideoSort", "Sorting"), _listing_members(listing), listing
+        )
     if "listing" in params:
-        kwargs["listing"] = _enum_value(module, "Listing", "POPULAR" if listing == "popular" else "POPULAR", listing)
+        kwargs["listing"] = _enum_value(
+            module, ("Listing", "VideoListing"), _listing_members(listing), listing
+        )
     value = await _resolve(method(**kwargs))
     return await _collect(value, provider, limit)
 
